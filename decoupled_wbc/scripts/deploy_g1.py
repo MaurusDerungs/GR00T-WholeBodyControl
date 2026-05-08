@@ -268,8 +268,14 @@ class G1Deployment:
             self.config.hand_control_device,
             "--body_streamer_ip",
             self.config.body_streamer_ip,
+            "--body_streamer_port",
+            str(self.config.body_streamer_port),
             "--body_streamer_keyword",
             self.config.body_streamer_keyword,
+            "--quest_bridge_host",
+            self.config.quest_bridge_host,
+            "--quest_bridge_port",
+            str(self.config.quest_bridge_port),
         ]
 
         # Handle boolean flags using tyro syntax

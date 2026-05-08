@@ -144,16 +144,25 @@ class BaseConfig(ArgsConfigTemplate):
     """Joint groups to apply gravity compensation to (e.g., ['arms', 'left_arm', 'right_arm'])."""
     # Teleop/Device Configuration
     body_control_device: str = "dummy"
-    """Device to use for body control. Options: dummy, vive, iphone, leapmotion, joycon."""
+    """Device to use for body control. Options: dummy, vive, quest, iphone, leapmotion, joycon."""
 
     hand_control_device: Optional[str] = "dummy"
-    """Device to use for hand control. Options: None, manus, joycon, iphone."""
+    """Device to use for hand control. Options: None, manus, joycon, iphone, pico, quest."""
 
     body_streamer_ip: str = "10.112.210.229"
     """IP address for body streamer (vive only)."""
 
+    body_streamer_port: int = 5555
+    """Port for network streamers such as Vive."""
+
     body_streamer_keyword: str = "knee"
     """Body streamer keyword (vive only)."""
+
+    quest_bridge_host: str = "127.0.0.1"
+    """Host running the local Quest HTTPS bridge service."""
+
+    quest_bridge_port: int = 8765
+    """Port used by the local Quest HTTPS bridge service."""
 
     enable_visualization: bool = False
     """Whether to enable visualization."""

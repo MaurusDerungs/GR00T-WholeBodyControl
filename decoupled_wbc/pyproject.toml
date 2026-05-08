@@ -25,6 +25,47 @@ dependencies = [
 license = {file = "../LICENSE"}
 
 [project.optional-dependencies]
+# Quest WBC teleop: deps for running Meta Quest 3S teleoperation with the
+# decoupled whole-body controller (quest bridge + control loop + teleop policy).
+# The quest bridge itself (run_quest_bridge.py) only needs stdlib — this extra
+# covers the control loop and teleop policy loop.
+# ROS 2 Humble must be on the PYTHONPATH separately (see install_quest_wbc.sh).
+# Usage: pip install -e "decoupled_wbc[quest_wbc]"
+quest_wbc = [
+    # Core numerics
+    "numpy==1.26.4",
+    "scipy==1.15.3",
+    "torch",
+    # CLI / config
+    "tyro",
+    "pyyaml",
+    # Robotics / IK
+    "pin",
+    "pin-pink",
+    "qpsolvers[osqp,quadprog]",
+    "meshcat",
+    "meshcat-shapes",
+    # Env / Gym interface
+    "gymnasium",
+    "mujoco",
+    # Messaging
+    "msgpack",
+    "msgpack-numpy",
+    "pyzmq",
+    # Vision
+    "opencv-python",
+    # Inference runtime
+    "onnxruntime",
+    # Viz
+    "rerun-sdk==0.21.0",
+    # Unit-tree SDK messaging helpers
+    "termcolor",
+    "loguru",
+    # Input / keyboard
+    "sshkeyboard",
+    "pygame",
+    "glfw",
+]
 # Full: all dependencies for the complete decoupled_wbc project
 # Usage: pip install -e "decoupled_wbc[full]"
 full = [

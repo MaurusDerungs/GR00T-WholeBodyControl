@@ -16,7 +16,10 @@ class TeleopStreamer:
         hand_control_device: Optional[str] = None,
         enable_real_device=True,
         body_streamer_ip="",
+        body_streamer_port=5555,
         body_streamer_keyword="",
+        quest_bridge_host="127.0.0.1",
+        quest_bridge_port=8765,
         replay_data_path: Optional[str] = None,
         replay_speed: float = 1.0,
     ):
@@ -26,7 +29,10 @@ class TeleopStreamer:
         self.body_control_device = body_control_device
         self.hand_control_device = hand_control_device
         self.body_streamer_ip = body_streamer_ip
+        self.body_streamer_port = body_streamer_port
         self.body_streamer_keyword = body_streamer_keyword
+        self.quest_bridge_host = quest_bridge_host
+        self.quest_bridge_port = quest_bridge_port
         self.replay_speed = replay_speed
 
         # enable real robot and devices
@@ -36,7 +42,9 @@ class TeleopStreamer:
                 from decoupled_wbc.control.teleop.streamers.vive_streamer import ViveStreamer
 
                 self.body_streamer = ViveStreamer(
-                    ip=self.body_streamer_ip, keyword=self.body_streamer_keyword
+                    ip=self.body_streamer_ip,
+                    port=self.body_streamer_port,
+                    keyword=self.body_streamer_keyword,
                 )
                 self.body_streamer.start_streaming()
             elif body_control_device == "iphone":
@@ -61,6 +69,14 @@ class TeleopStreamer:
                 from decoupled_wbc.control.teleop.streamers.pico_streamer import PicoStreamer
 
                 self.body_streamer = PicoStreamer()
+                self.body_streamer.start_streaming()
+            elif body_control_device == "quest":
+                from decoupled_wbc.control.teleop.streamers.quest_streamer import QuestStreamer
+
+                self.body_streamer = QuestStreamer(
+                    host=self.quest_bridge_host,
+                    port=self.quest_bridge_port,
+                )
                 self.body_streamer.start_streaming()
             elif body_control_device == "dummy":
                 from decoupled_wbc.control.teleop.streamers.dummy_streamer import DummyStreamer
@@ -90,6 +106,14 @@ class TeleopStreamer:
                     from decoupled_wbc.control.teleop.streamers.pico_streamer import PicoStreamer
 
                     self.hand_streamer = PicoStreamer()
+                    self.hand_streamer.start_streaming()
+                elif hand_control_device == "quest":
+                    from decoupled_wbc.control.teleop.streamers.quest_streamer import QuestStreamer
+
+                    self.hand_streamer = QuestStreamer(
+                        host=self.quest_bridge_host,
+                        port=self.quest_bridge_port,
+                    )
                     self.hand_streamer.start_streaming()
                 else:
                     self.hand_streamer = None

@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quest Teleop Bridge</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f172a;
+      --panel: rgba(15, 23, 42, 0.88);
+      --panel-border: rgba(148, 163, 184, 0.22);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-strong: #0ea5e9;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --error: #ef4444;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(14, 165, 233, 0.25), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.18), transparent 35%),
+        linear-gradient(180deg, #020617 0%, #0f172a 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 24px;
+    }
+
+    .panel {
+      width: min(920px, 100%);
+      border: 1px solid var(--panel-border);
+      border-radius: 24px;
+      background: var(--panel);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 24px 80px rgba(2, 6, 23, 0.45);
+      overflow: hidden;
+    }
+
+    .hero {
+      padding: 28px 28px 16px;
+      border-bottom: 1px solid var(--panel-border);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(28px, 4vw, 40px);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 20px 28px;
+      border-bottom: 1px solid var(--panel-border);
+    }
+
+    button {
+      appearance: none;
+      border: none;
+      border-radius: 999px;
+      padding: 14px 20px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 140ms ease, background 140ms ease, opacity 140ms ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      color: #001018;
+    }
+
+    .secondary {
+      background: rgba(148, 163, 184, 0.16);
+      color: var(--text);
+      border: 1px solid rgba(148, 163, 184, 0.22);
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      padding: 20px 28px 28px;
+    }
+
+    .card {
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      padding: 16px;
+      background: rgba(15, 23, 42, 0.58);
+    }
+
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 15px;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 14px;
+      font-weight: 600;
+      background: rgba(148, 163, 184, 0.16);
+      color: var(--text);
+    }
+
+    .status-pill.ok {
+      background: rgba(34, 197, 94, 0.16);
+      color: #bbf7d0;
+    }
+
+    .status-pill.warn {
+      background: rgba(245, 158, 11, 0.16);
+      color: #fde68a;
+    }
+
+    .status-pill.error {
+      background: rgba(239, 68, 68, 0.16);
+      color: #fecaca;
+    }
+
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+      gap: 12px;
+      font-size: 15px;
+    }
+
+    .metric span:first-child {
+      color: var(--muted);
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      color: #bae6fd;
+      word-break: break-word;
+    }
+
+    .tips {
+      display: grid;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <section class="hero">
+      <h1>Meta Quest 3S Teleop Bridge</h1>
+      <p>Open this page in the Quest browser, start the VR session, then use the GR00T teleop loop on the PC or robot to consume the live headset and controller poses.</p>
+    </section>
+
+    <section class="controls">
+      <button id="startButton" class="primary">Start VR Session</button>
+      <button id="stopButton" class="secondary" disabled>Stop Session</button>
+    </section>
+
+    <section class="content">
+      <article class="card">
+        <h2>Status</h2>
+        <div id="statusPill" class="status-pill warn">Waiting for WebXR</div>
+        <div class="metric"><span>Session</span><span id="sessionMode">idle</span></div>
+        <div class="metric"><span>Frames sent</span><span id="frameCount">0</span></div>
+        <div class="metric"><span>Bridge uploads</span><span id="uploadCount">0</span></div>
+        <div class="metric"><span>Upload FPS</span><span id="uploadFps">0.0</span></div>
+      </article>
+
+      <article class="card">
+        <h2>Headset</h2>
+        <div class="metric"><span>Position</span><code id="headPosition">n/a</code></div>
+        <div class="metric"><span>Orientation</span><code id="headOrientation">n/a</code></div>
+      </article>
+
+      <article class="card">
+        <h2>Left Controller</h2>
+        <div class="metric"><span>Pose</span><code id="leftPose">n/a</code></div>
+        <div class="metric"><span>Axes</span><code id="leftAxes">[0, 0]</code></div>
+        <div class="metric"><span>Trigger / Grip</span><code id="leftButtons">0.00 / 0.00</code></div>
+      </article>
+
+      <article class="card">
+        <h2>Right Controller</h2>
+        <div class="metric"><span>Pose</span><code id="rightPose">n/a</code></div>
+        <div class="metric"><span>Axes</span><code id="rightAxes">[0, 0]</code></div>
+        <div class="metric"><span>Trigger / Grip</span><code id="rightButtons">0.00 / 0.00</code></div>
+      </article>
+
+      <article class="card" style="grid-column: 1 / -1;">
+        <h2>How To Use</h2>
+        <div class="tips">
+          <div>1. Accept the certificate warning if the browser asks for it. This bridge uses a local self-signed HTTPS certificate so WebXR can run on your LAN.</div>
+          <div>2. Press <code>Start VR Session</code> and allow immersive VR access.</div>
+          <div>3. Hold both controllers in a neutral pose, then activate teleop from GR00T with the keyboard <code>l</code> to calibrate the robot to your current pose.</div>
+          <div>4. Left thumbstick drives translation, right thumbstick drives yaw. Triggers close the fingers in the default Quest mapping used by the GR00T bridge.</div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const elements = {
+      startButton: document.getElementById("startButton"),
+      stopButton: document.getElementById("stopButton"),
+      statusPill: document.getElementById("statusPill"),
+      sessionMode: document.getElementById("sessionMode"),
+      frameCount: document.getElementById("frameCount"),
+      uploadCount: document.getElementById("uploadCount"),
+      uploadFps: document.getElementById("uploadFps"),
+      headPosition: document.getElementById("headPosition"),
+      headOrientation: document.getElementById("headOrientation"),
+      leftPose: document.getElementById("leftPose"),
+      leftAxes: document.getElementById("leftAxes"),
+      leftButtons: document.getElementById("leftButtons"),
+      rightPose: document.getElementById("rightPose"),
+      rightAxes: document.getElementById("rightAxes"),
+      rightButtons: document.getElementById("rightButtons"),
+    };
+
+    const state = {
+      xrSession: null,
+      referenceSpace: null,
+      frameId: 0,
+      uploadCount: 0,
+      lastUploadAt: performance.now(),
+      lastUploadSampleCount: 0,
+      uploadInFlight: false,
+      uploadIntervalMs: 50,
+      lastUploadFrameTime: 0,
+    };
+
+    function setStatus(message, kind) {
+      elements.statusPill.textContent = message;
+      elements.statusPill.className = `status-pill ${kind}`;
+    }
+
+    function formatVector(values, digits = 3) {
+      if (!values) return "n/a";
+      return `[${values.map((value) => Number(value).toFixed(digits)).join(", ")}]`;
+    }
+
+    function poseFromTransform(transform) {
+      if (!transform) return null;
+      return {
+        position: [
+          transform.position.x,
+          transform.position.y,
+          transform.position.z,
+        ],
+        orientation: [
+          transform.orientation.x,
+          transform.orientation.y,
+          transform.orientation.z,
+          transform.orientation.w,
+        ],
+      };
+    }
+
+    function extractButtons(gamepad) {
+      if (!gamepad) return [];
+      return gamepad.buttons.map((button) => ({
+        pressed: button.pressed,
+        touched: button.touched,
+        value: button.value,
+      }));
+    }
+
+    function extractAxes(gamepad) {
+      if (!gamepad) return [0, 0, 0, 0];
+      const axes = [...gamepad.axes];
+      while (axes.length < 4) axes.push(0);
+      return axes.slice(0, 4);
+    }
+
+    function extractController(frame, inputSource) {
+      const pose = frame.getPose(inputSource.gripSpace || inputSource.targetRaySpace, state.referenceSpace);
+      const gamepad = inputSource.gamepad || null;
+
+      return {
+        handedness: inputSource.handedness,
+        connected: Boolean(pose),
+        position: pose ? poseFromTransform(pose.transform).position : null,
+        orientation: pose ? poseFromTransform(pose.transform).orientation : null,
+        axes: extractAxes(gamepad),
+        buttons: extractButtons(gamepad),
+        profiles: inputSource.profiles || [],
+      };
+    }
+
+    function buildPayload(frame, viewerPose, timeMs) {
+      const controllers = {
+        left: null,
+        right: null,
+      };
+
+      for (const inputSource of state.xrSession.inputSources) {
+        if (inputSource.handedness !== "left" && inputSource.handedness !== "right") {
+          continue;
+        }
+        controllers[inputSource.handedness] = extractController(frame, inputSource);
+      }
+
+      return {
+        session: {
+          active: true,
+          mode: "immersive-vr",
+          reference_space_type: "local-floor",
+          frame_id: state.frameId,
+          client_time_ms: timeMs,
+        },
+        headset: poseFromTransform(viewerPose.transform),
+        controllers,
+      };
+    }
+
+    async function uploadPayload(payload) {
+      if (state.uploadInFlight) return;
+      state.uploadInFlight = true;
+
+      try {
+        const response = await fetch("/api/update", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Bridge responded with ${response.status}`);
+        }
+
+        state.uploadCount += 1;
+      } catch (error) {
+        console.error(error);
+        setStatus(`Upload failed: ${error.message}`, "error");
+      } finally {
+        state.uploadInFlight = false;
+      }
+    }
+
+    function updateHud(payload) {
+      state.frameId += 1;
+      elements.sessionMode.textContent = payload.session.mode;
+      elements.frameCount.textContent = String(state.frameId);
+      elements.uploadCount.textContent = String(state.uploadCount);
+
+      const now = performance.now();
+      if (now - state.lastUploadAt >= 1000) {
+        const uploadsThisSecond = state.uploadCount - state.lastUploadSampleCount;
+        elements.uploadFps.textContent = uploadsThisSecond.toFixed(1);
+        state.lastUploadAt = now;
+        state.lastUploadSampleCount = state.uploadCount;
+      }
+
+      elements.headPosition.textContent = formatVector(payload.headset?.position);
+      elements.headOrientation.textContent = formatVector(payload.headset?.orientation);
+
+      const left = payload.controllers.left;
+      const right = payload.controllers.right;
+
+      elements.leftPose.textContent = left && left.position ? formatVector(left.position) : "n/a";
+      elements.leftAxes.textContent = left ? formatVector(left.axes.slice(0, 2), 2) : "[0, 0]";
+      elements.leftButtons.textContent = left
+        ? `${(left.buttons[0]?.value || 0).toFixed(2)} / ${(left.buttons[1]?.value || 0).toFixed(2)}`
+        : "0.00 / 0.00";
+
+      elements.rightPose.textContent = right && right.position ? formatVector(right.position) : "n/a";
+      elements.rightAxes.textContent = right ? formatVector(right.axes.slice(0, 2), 2) : "[0, 0]";
+      elements.rightButtons.textContent = right
+        ? `${(right.buttons[0]?.value || 0).toFixed(2)} / ${(right.buttons[1]?.value || 0).toFixed(2)}`
+        : "0.00 / 0.00";
+    }
+
+    function onSessionEnded() {
+      state.xrSession = null;
+      state.referenceSpace = null;
+      elements.startButton.disabled = false;
+      elements.stopButton.disabled = true;
+      elements.sessionMode.textContent = "idle";
+      setStatus("Session ended", "warn");
+    }
+
+    function onXRFrame(timeMs, frame) {
+      if (!state.xrSession) return;
+      state.xrSession.requestAnimationFrame(onXRFrame);
+
+      const viewerPose = frame.getViewerPose(state.referenceSpace);
+      if (!viewerPose) return;
+
+      const payload = buildPayload(frame, viewerPose, timeMs);
+      updateHud(payload);
+
+      if (timeMs - state.lastUploadFrameTime >= state.uploadIntervalMs) {
+        state.lastUploadFrameTime = timeMs;
+        void uploadPayload(payload);
+      }
+    }
+
+    async function startVrSession() {
+      if (!navigator.xr) {
+        setStatus("WebXR is not available in this browser", "error");
+        return;
+      }
+
+      try {
+        state.xrSession = await navigator.xr.requestSession("immersive-vr", {
+          requiredFeatures: ["local-floor"],
+          optionalFeatures: ["bounded-floor", "hand-tracking"],
+        });
+        state.xrSession.addEventListener("end", onSessionEnded);
+        state.referenceSpace = await state.xrSession.requestReferenceSpace("local-floor");
+        state.xrSession.requestAnimationFrame(onXRFrame);
+
+        elements.startButton.disabled = true;
+        elements.stopButton.disabled = false;
+        setStatus("VR session live", "ok");
+      } catch (error) {
+        console.error(error);
+        setStatus(`Failed to start VR session: ${error.message}`, "error");
+      }
+    }
+
+    async function stopVrSession() {
+      if (!state.xrSession) return;
+      await state.xrSession.end();
+    }
+
+    async function detectSupport() {
+      if (!navigator.xr) {
+        setStatus("WebXR unsupported in this browser", "error");
+        elements.startButton.disabled = true;
+        return;
+      }
+
+      const supported = await navigator.xr.isSessionSupported("immersive-vr");
+      if (!supported) {
+        setStatus("Immersive VR unsupported on this device", "error");
+        elements.startButton.disabled = true;
+        return;
+      }
+
+      setStatus("Ready to start VR session", "ok");
+    }
+
+    elements.startButton.addEventListener("click", () => {
+      void startVrSession();
+    });
+    elements.stopButton.addEventListener("click", () => {
+      void stopVrSession();
+    });
+
+    void detectSupport();
+  </script>
+</body>
+</html>
