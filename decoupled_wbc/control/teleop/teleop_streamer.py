@@ -78,6 +78,11 @@ class TeleopStreamer:
                     port=self.quest_bridge_port,
                 )
                 self.body_streamer.start_streaming()
+            elif body_control_device == "oculus":
+                from decoupled_wbc.control.teleop.streamers.oculus_streamer import OculusStreamer
+
+                self.body_streamer = OculusStreamer()
+                self.body_streamer.start_streaming()
             elif body_control_device == "dummy":
                 from decoupled_wbc.control.teleop.streamers.dummy_streamer import DummyStreamer
 
@@ -114,6 +119,11 @@ class TeleopStreamer:
                         host=self.quest_bridge_host,
                         port=self.quest_bridge_port,
                     )
+                    self.hand_streamer.start_streaming()
+                elif hand_control_device == "oculus":
+                    from decoupled_wbc.control.teleop.streamers.oculus_streamer import OculusStreamer
+
+                    self.hand_streamer = OculusStreamer()
                     self.hand_streamer.start_streaming()
                 else:
                     self.hand_streamer = None

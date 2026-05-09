@@ -144,7 +144,7 @@ class BaseConfig(ArgsConfigTemplate):
     """Joint groups to apply gravity compensation to (e.g., ['arms', 'left_arm', 'right_arm'])."""
     # Teleop/Device Configuration
     body_control_device: str = "dummy"
-    """Device to use for body control. Options: dummy, vive, quest, iphone, leapmotion, joycon."""
+    """Device to use for body control. Options: dummy, vive, quest, oculus, iphone, leapmotion, joycon."""
 
     hand_control_device: Optional[str] = "dummy"
     """Device to use for hand control. Options: None, manus, joycon, iphone, pico, quest."""

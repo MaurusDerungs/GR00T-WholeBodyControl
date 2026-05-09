@@ -69,8 +69,8 @@ class WristsPreProcessor(PreProcessor):
             # local frame with hardcoded rotations since we don't have a common
             # reference frame for teleop and robot.
             self.init_teleop_T_init_ee[ee_name] = np.eye(4)
-            if control_device in {"pico", "quest"}:
-                # TODO: add pico wrist calibration respect to the headset frame
+            if control_device in {"pico", "quest", "oculus"}:
+                # poses are already expressed in a robot-aligned frame; no extra rotation needed
                 pass
             else:
                 if ee_name == self.robot.supplemental_info.hand_frame_names["left"]:

@@ -144,6 +144,21 @@ uv pip install -e external_dependencies/unitree_sdk2_python
 echo "[INFO] Verifying decoupled_wbc editable install …"
 uv pip install -e decoupled_wbc --no-deps
 
+# ── 9b. Install oculus_reader (USB/ADB direct Quest streaming) ────────────────
+# oculus_reader lets Python read Quest controller poses via ADB over USB without
+# a Wi-Fi bridge. Needed only if you use --body_control_device oculus.
+echo "[INFO] Installing oculus_reader …"
+uv pip install git+https://github.com/rail-berkeley/oculus_reader.git
+
+# Install ADB tools (required by oculus_reader at runtime)
+if ! command -v adb &>/dev/null; then
+    echo "[INFO] adb not found – installing android-tools-adb …"
+    sudo apt-get install -y android-tools-adb 2>/dev/null || \
+        echo "[WARN] Could not auto-install adb. Install manually: sudo apt install android-tools-adb"
+else
+    echo "[OK] adb $(adb --version | head -1)"
+fi
+
 # ── 10. Generate self-signed certificate for the Quest HTTPS bridge ───────────
 echo "[INFO] Generating self-signed TLS certificate for Quest bridge …"
 CERT_DIR="$REPO_ROOT/.quest_bridge"

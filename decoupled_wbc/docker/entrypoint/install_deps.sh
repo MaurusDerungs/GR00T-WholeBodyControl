@@ -21,3 +21,6 @@ fi
 if [ -f "decoupled_wbc/pyproject.toml" ]; then
     UV_GIT_LFS=1 uv pip install -e "decoupled_wbc[full,dev]" -e "gear_sonic[sim]"
 fi
+
+# oculus_reader: USB/ADB Quest streaming (needed for --body_control_device oculus)
+uv pip install git+https://github.com/rail-berkeley/oculus_reader.git
