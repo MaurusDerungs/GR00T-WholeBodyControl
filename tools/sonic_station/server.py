@@ -501,6 +501,7 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                         "/motion/play",
                         "/playbacks",
                         "/playbacks/<id>",
+                        "/control/reset",
                         "/",
                         "/camera/status",
                         "/camera/latest.jpg",
@@ -583,6 +584,7 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                     "/jobs",
                     "/jobs/<id>",
                     "/motion/play",
+                    "/control/reset",
                     "/playbacks",
                     "/playbacks/<id>",
                     "/camera/status",
@@ -595,13 +597,13 @@ class SonicStationHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path not in ("/generate", "/motion/play", "/camera/view"):
+        if path not in ("/generate", "/motion/play", "/control/reset", "/camera/view"):
             self._send_json(
                 {
                     "ok": False,
                     "error": "not_found",
                     "path": path,
-                    "available": ["/generate", "/motion/play", "/camera/view"],
+                    "available": ["/generate", "/motion/play", "/control/reset", "/camera/view"],
                 },
                 HTTPStatus.NOT_FOUND,
             )
@@ -619,6 +621,69 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                 return
             view = _CAMERA_VIEW_STORE.write(data)
             self._send_json({"ok": True, "view": view})
+            return
+
+        if path == "/control/reset":
+            action = str(data.get("action", "")).strip()
+            allowed_actions = {"emergency_stop", "idle_reset", "motion_restart"}
+            if action not in allowed_actions:
+                self._send_json(
+                    {
+                        "ok": False,
+                        "error": "bad_request",
+                        "message": f"action must be one of: {', '.join(sorted(allowed_actions))}",
+                    },
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            if not STREAM_SCRIPT.exists():
+                self._send_json(
+                    {"ok": False, "error": "missing_stream_script", "path": str(STREAM_SCRIPT)},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+
+            command = [
+                sys.executable,
+                str(STREAM_SCRIPT),
+                "--control-action",
+                action,
+                "--startup-delay",
+                "0.1",
+                "--repeat-command",
+                "8",
+                "--repeat-command-interval",
+                "0.04",
+            ]
+            try:
+                proc = subprocess.run(
+                    command,
+                    cwd=REPO_ROOT,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=3.0,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                self._send_json(
+                    {"ok": False, "error": "control_timeout", "action": action},
+                    HTTPStatus.GATEWAY_TIMEOUT,
+                )
+                return
+            if proc.returncode != 0:
+                self._send_json(
+                    {
+                        "ok": False,
+                        "error": "control_failed",
+                        "action": action,
+                        "returncode": proc.returncode,
+                        "output": proc.stdout[-2000:],
+                    },
+                    HTTPStatus.BAD_GATEWAY,
+                )
+                return
+            self._send_json({"ok": True, "action": action})
             return
 
         if path == "/motion/play":
@@ -741,6 +806,7 @@ class SonicStationHandler(BaseHTTPRequestHandler):
             "GET /camera/latest.jpg",
             "GET /camera/view ",
             "POST /camera/view ",
+            "POST /control/reset ",
         )
         if any(path in message for path in quiet_paths):
             return

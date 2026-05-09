@@ -5,7 +5,8 @@
  *
  * Two message types are defined:
  *  - CommandMessage  – carries high-level control signals (start / stop /
- *                      planner-mode toggle) received on the ZMQ "command" topic.
+ *                      planner-mode toggle / reset requests) received on the
+ *                      ZMQ "command" topic.
  *  - PlannerMessage  – carries per-frame locomotion commands (mode, movement
  *                      direction, facing direction, speed, height, and optional
  *                      upper-body / hand data) received on the ZMQ "planner" topic.
@@ -29,7 +30,8 @@
  * @brief Wire format for the ZMQ "command" topic.
  *
  * Packed binary layout sent by the remote controller:
- *   { start: bool, stop: bool, planner: bool, delta_heading?: f32/f64 }
+ *   { start: bool, stop: bool, planner: bool,
+ *     idle_reset?: bool, motion_restart?: bool, delta_heading?: f32/f64 }
  *
  * Multiple messages between two update() calls are accumulated using OR logic
  * for start/stop (so a transient pulse is never lost), while the planner flag
@@ -40,6 +42,8 @@ struct CommandMessage {
   bool stop = false;      ///< When true, request an emergency / graceful stop.
   bool planner = false;   ///< true  → planner mode  (use planner topic for locomotion)
                           ///< false → streamed-motion mode  (use pose topic)
+  bool idle_reset = false;      ///< Return to the loaded reference IDLE motion at frame 0.
+  bool motion_restart = false;  ///< Restart the current animation from frame 0.
   /// Optional absolute heading override (radians).  When set, the value is
   /// written directly into HeadingState.delta_heading.
   std::optional<double> delta_heading;
@@ -105,4 +109,3 @@ struct PlannerMessage {
   /// Used to detect planner timeouts (stale data → fallback to IDLE).
   std::chrono::steady_clock::time_point timestamp{};
 };
-

@@ -29,6 +29,9 @@ const el = {
   nameInput: document.querySelector("#nameInput"),
   durationInput: document.querySelector("#durationInput"),
   refreshButton: document.querySelector("#refreshButton"),
+  emergencyStopButton: document.querySelector("#emergencyStopButton"),
+  idleResetButton: document.querySelector("#idleResetButton"),
+  motionRestartButton: document.querySelector("#motionRestartButton"),
   statusLog: document.querySelector("#statusLog"),
   generatedList: document.querySelector("#generatedList"),
   curatedList: document.querySelector("#curatedList"),
@@ -348,8 +351,31 @@ async function playMotion(motionId) {
   }
 }
 
+async function sendReset(action, label) {
+  const buttons = [el.emergencyStopButton, el.idleResetButton, el.motionRestartButton];
+  buttons.forEach((button) => {
+    button.disabled = true;
+  });
+  try {
+    await api("/control/reset", {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+    log(`${label} sent.`);
+  } catch (error) {
+    log(error.message);
+  } finally {
+    buttons.forEach((button) => {
+      button.disabled = false;
+    });
+  }
+}
+
 el.generateForm.addEventListener("submit", generateMotion);
 el.refreshButton.addEventListener("click", () => refresh());
+el.emergencyStopButton.addEventListener("click", () => sendReset("emergency_stop", "Emergency stop"));
+el.idleResetButton.addEventListener("click", () => sendReset("idle_reset", "IDLE reset"));
+el.motionRestartButton.addEventListener("click", () => sendReset("motion_restart", "Motion restart"));
 el.cameraResetButton.addEventListener("click", resetCameraView);
 el.simImage.parentElement.addEventListener("pointerdown", onCameraPointerDown);
 el.simImage.parentElement.addEventListener("pointermove", onCameraPointerMove);

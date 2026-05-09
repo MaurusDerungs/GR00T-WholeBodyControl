@@ -130,6 +130,24 @@ h2 {
   border-bottom-color: #7b1d24;
 }
 
+.reset-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.reset-bar button {
+  min-width: 140px;
+}
+
+.reset-bar .emergency {
+  min-width: 180px;
+  background: #a40f1d;
+  border-color: #ff6571;
+  font-weight: 800;
+}
+
 .control-grid,
 .activity-grid {
   display: grid;

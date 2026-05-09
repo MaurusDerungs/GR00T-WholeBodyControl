@@ -7,8 +7,9 @@
  *
  *   Topic      | Purpose
  *   -----------|--------
- *   command    | High-level control (start / stop / mode switch).
- *              | Wire format: `{ start: bool, stop: bool, planner: bool, delta_heading?: f32 }`
+ *   command    | High-level control (start / stop / mode switch / reset).
+ *              | Wire format: `{ start: bool, stop: bool, planner: bool,
+ *              | idle_reset?: bool, motion_restart?: bool, delta_heading?: f32 }`
  *   planner    | Per-frame locomotion commands (mode, movement, facing, speed, height,
  *              | optional upper-body / hand / VR data).  Active in PLANNER mode.
  *   pose       | Streamed motion frames (joint_pos, joint_vel, body_quat, …).
@@ -163,6 +164,8 @@ class ZMQManager : public InputInterface {
       report_temperature_flag_ = false;
       start_control_ = false;
       stop_control_ = false;
+      idle_reset_requested_ = false;
+      motion_restart_requested_ = false;
       
       // Handle stdin shortcuts
       char ch;
@@ -243,9 +246,21 @@ class ZMQManager : public InputInterface {
           if (latest_command_.stop) {
             stop_control_ = true;
           }
+          if (latest_command_.idle_reset) {
+            idle_reset_requested_ = true;
+          }
+          if (latest_command_.motion_restart) {
+            motion_restart_requested_ = true;
+          }
 
-          // Handle mode switching
-          ManagedMode new_mode = latest_command_.planner ? ManagedMode::PLANNER : ManagedMode::STREAMED_MOTION;
+          // Handle mode switching.  Reset-to-idle always returns to planner/reference mode,
+          // while restart keeps the currently active mode and only rewinds the frame.
+          ManagedMode new_mode = active_mode_;
+          if (latest_command_.idle_reset) {
+            new_mode = ManagedMode::PLANNER;
+          } else if (!latest_command_.motion_restart) {
+            new_mode = latest_command_.planner ? ManagedMode::PLANNER : ManagedMode::STREAMED_MOTION;
+          }
           
           if (new_mode != active_mode_) {
             // Trigger safety reset on mode switch
@@ -364,6 +379,57 @@ class ZMQManager : public InputInterface {
         
         // Clear hand joints control state
         has_hand_joints_ = false;
+      }
+
+      if (idle_reset_requested_) {
+        movement_state_buffer.SetData(MovementState(
+          static_cast<int>(LocomotionMode::IDLE),
+          {0.0f, 0.0f, 0.0f},
+          {1.0f, 0.0f, 0.0f},
+          -1.0f,
+          -1.0f
+        ));
+        {
+          std::lock_guard<std::mutex> lock(current_motion_mutex);
+          operator_state.play = false;
+          current_frame = 0;
+          reinitialize_heading = true;
+          if (!motion_reader.motions.empty()) {
+            current_motion = motion_reader.GetMotionShared(motion_reader.current_motion_index_);
+            if (current_motion && current_motion->GetEncodeMode() == 1) {
+              current_motion->SetEncodeMode(0);
+            }
+          }
+        }
+        if (planner_state.enabled) {
+          planner_state.enabled = false;
+          planner_state.initialized = false;
+        }
+        {
+          std::lock_guard<std::mutex> lock(planner_mutex_);
+          latest_planner_message_.valid = false;
+          latest_planner_message_.timestamp = {};
+        }
+        is_planner_ready_ = false;
+        has_upper_body_control_ = false;
+        has_hand_joints_ = false;
+        has_vr_3point_control_ = false;
+        has_external_token_state_ = false;
+        switch_from_teleop_to_planner_ = true;
+        CheckAndClearSafetyReset();
+        std::cout << "[ZMQManager] Idle reset: returned to reference motion at frame 0" << std::endl;
+        return;
+      }
+
+      if (motion_restart_requested_) {
+        {
+          std::lock_guard<std::mutex> lock(current_motion_mutex);
+          current_frame = 0;
+          reinitialize_heading = true;
+          operator_state.play = operator_state.start;
+        }
+        std::cout << "[ZMQManager] Motion restart: current motion reset to frame 0" << std::endl;
+        return;
       }
 
       // Delegate based on current mode
@@ -681,10 +747,13 @@ class ZMQManager : public InputInterface {
       if (hdr.fields.empty() || bufs.empty()) return;
       
       int start_idx = -1, stop_idx = -1, planner_idx = -1;
+      int idle_reset_idx = -1, motion_restart_idx = -1;
       for (size_t i = 0; i < hdr.fields.size(); ++i) {
         if (hdr.fields[i].name == "start") start_idx = static_cast<int>(i);
         else if (hdr.fields[i].name == "stop") stop_idx = static_cast<int>(i);
         else if (hdr.fields[i].name == "planner") planner_idx = static_cast<int>(i);
+        else if (hdr.fields[i].name == "idle_reset") idle_reset_idx = static_cast<int>(i);
+        else if (hdr.fields[i].name == "motion_restart") motion_restart_idx = static_cast<int>(i);
       }
       
       if (start_idx < 0 || stop_idx < 0 || planner_idx < 0) {
@@ -697,72 +766,49 @@ class ZMQManager : public InputInterface {
       
       bool needs_swap = hdr.NeedsByteSwap();
       
-      // Decode start
-      const auto& start_buf = bufs[start_idx];
-      const auto& start_field = hdr.fields[start_idx];
-      if (start_field.dtype == "bool" || start_field.dtype == "u8") {
-        uint8_t val = 0;
-        if (start_buf.size >= sizeof(uint8_t)) {
-          std::memcpy(&val, start_buf.data, sizeof(uint8_t));
-          cmd.start = (val != 0);
+      auto decode_bool = [&](int idx) -> bool {
+        if (idx < 0) return false;
+        const auto& buf = bufs[idx];
+        const auto& field = hdr.fields[idx];
+        if (field.dtype == "bool" || field.dtype == "u8") {
+          uint8_t val = 0;
+          if (buf.size >= sizeof(uint8_t)) {
+            std::memcpy(&val, buf.data, sizeof(uint8_t));
+            return val != 0;
+          }
+        } else if (field.dtype == "i32") {
+          int32_t val = 0;
+          if (buf.size >= sizeof(int32_t)) {
+            std::memcpy(&val, buf.data, sizeof(int32_t));
+            if (needs_swap) val = byte_swap(val);
+            return val != 0;
+          }
         }
-      } else if (start_field.dtype == "i32") {
-        int32_t val = 0;
-        if (start_buf.size >= sizeof(int32_t)) {
-          std::memcpy(&val, start_buf.data, sizeof(int32_t));
-          if (needs_swap) val = byte_swap(val);
-          cmd.start = (val != 0);
-        }
-      }
-      
-      // Decode stop
-      const auto& stop_buf = bufs[stop_idx];
-      const auto& stop_field = hdr.fields[stop_idx];
-      if (stop_field.dtype == "bool" || stop_field.dtype == "u8") {
-        uint8_t val = 0;
-        if (stop_buf.size >= sizeof(uint8_t)) {
-          std::memcpy(&val, stop_buf.data, sizeof(uint8_t));
-          cmd.stop = (val != 0);
-        }
-      } else if (stop_field.dtype == "i32") {
-        int32_t val = 0;
-        if (stop_buf.size >= sizeof(int32_t)) {
-          std::memcpy(&val, stop_buf.data, sizeof(int32_t));
-          if (needs_swap) val = byte_swap(val);
-          cmd.stop = (val != 0);
-        }
-      }
-      
-      // Decode planner
-      const auto& planner_buf = bufs[planner_idx];
-      const auto& planner_field = hdr.fields[planner_idx];
-      if (planner_field.dtype == "bool" || planner_field.dtype == "u8") {
-        uint8_t val = 0;
-        if (planner_buf.size >= sizeof(uint8_t)) {
-          std::memcpy(&val, planner_buf.data, sizeof(uint8_t));
-          cmd.planner = (val != 0);
-        }
-      } else if (planner_field.dtype == "i32") {
-        int32_t val = 0;
-        if (planner_buf.size >= sizeof(int32_t)) {
-          std::memcpy(&val, planner_buf.data, sizeof(int32_t));
-          if (needs_swap) val = byte_swap(val);
-          cmd.planner = (val != 0);
-        }
-      }
+        return false;
+      };
+
+      cmd.start = decode_bool(start_idx);
+      cmd.stop = decode_bool(stop_idx);
+      cmd.planner = decode_bool(planner_idx);
+      cmd.idle_reset = decode_bool(idle_reset_idx);
+      cmd.motion_restart = decode_bool(motion_restart_idx);
       
       // Update buffer with OR logic to accumulate start/stop signals
       std::lock_guard<std::mutex> lock(command_mutex_);
       
-      // If starting new accumulation cycle, reset start/stop
+      // If starting new accumulation cycle, reset pulse-style commands.
       if (!latest_command_.valid) {
         latest_command_.start = false;
         latest_command_.stop = false;
+        latest_command_.idle_reset = false;
+        latest_command_.motion_restart = false;
       }
       
-      // Accumulate start/stop with OR logic
+      // Accumulate pulse-style commands with OR logic.
       latest_command_.start = latest_command_.start || cmd.start;
       latest_command_.stop = latest_command_.stop || cmd.stop;
+      latest_command_.idle_reset = latest_command_.idle_reset || cmd.idle_reset;
+      latest_command_.motion_restart = latest_command_.motion_restart || cmd.motion_restart;
       latest_command_.planner = cmd.planner;  // Overwrite (mode should be latest)
       latest_command_.valid = true;
       
@@ -1248,6 +1294,8 @@ class ZMQManager : public InputInterface {
     bool report_temperature_flag_ = false;  ///< Set by 'F'/'f' keyboard shortcut.
     bool start_control_ = false;   ///< Start request from command message.
     bool stop_control_ = false;    ///< Stop request from command message.
+    bool idle_reset_requested_ = false;  ///< Return to loaded reference IDLE motion.
+    bool motion_restart_requested_ = false;  ///< Restart current animation at frame 0.
 
     /// True once the planner has been initialised and is generating motions.
     bool is_planner_ready_ = false;
