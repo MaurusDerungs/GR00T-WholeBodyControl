@@ -11,6 +11,7 @@ Current sequence:
 2. `dance_in_da_party_001__A464_M`
 3. `macarena_001__A545`
 4. `macarena_001__A545_M`
+5. `tired_one_leg_jumping_R_001__A359`
 
 `launch_dance_loop.sh` starts playback at motion index 1, so index 0 is only
 used as the quiet controlled pose before dancing begins.
