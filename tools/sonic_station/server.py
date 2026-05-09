@@ -25,12 +25,15 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from motion_registry import REPO_ROOT, discover_motions, motions_payload
+from stream_motion import build_command_message, build_pose_message, load_motion
 
 try:
     import msgpack
+    import numpy as np
     import zmq
 except ImportError:
     msgpack = None
+    np = None
     zmq = None
 
 
@@ -44,8 +47,16 @@ _PLAYBACK_LOCK = threading.Lock()
 _PLAYBACKS: dict[str, "PlaybackJob"] = {}
 _LATEST_PLAYBACK_ID = ""
 _CAMERA_VIEW_STORE: "CameraViewStore | None" = None
+_ZMQ_PUBLISHER: "StationZMQPublisher | None" = None
 _STATION_MODE = "sim"
 _ROBOT_INTERFACE = ""
+
+
+IDLE = 0
+SLOW_WALK = 1
+WALK = 2
+RUN = 3
+HEADER_SIZE = 1280
 
 
 class CameraViewStore:
@@ -191,6 +202,84 @@ class CameraFrameStore:
 _CAMERA_STORE: CameraFrameStore | None = None
 
 
+def _build_header(fields: list[dict], *, count: int = 1) -> bytes:
+    header = {"v": 1, "endian": "le", "count": count, "fields": fields}
+    header_json = json.dumps(header, separators=(",", ":")).encode("utf-8")
+    if len(header_json) > HEADER_SIZE:
+        raise ValueError(f"ZMQ header too large: {len(header_json)} > {HEADER_SIZE}")
+    return header_json.ljust(HEADER_SIZE, b"\x00")
+
+
+def _build_planner_message(mode: int, movement: list[float], facing: list[float], speed: float, height: float) -> bytes:
+    import struct
+
+    fields = [
+        {"name": "mode", "dtype": "i32", "shape": [1]},
+        {"name": "movement", "dtype": "f32", "shape": [3]},
+        {"name": "facing", "dtype": "f32", "shape": [3]},
+        {"name": "speed", "dtype": "f32", "shape": [1]},
+        {"name": "height", "dtype": "f32", "shape": [1]},
+    ]
+    payload = b"".join(
+        (
+            struct.pack("<i", int(mode)),
+            struct.pack("<fff", float(movement[0]), float(movement[1]), float(movement[2])),
+            struct.pack("<fff", float(facing[0]), float(facing[1]), float(facing[2])),
+            struct.pack("<f", float(speed)),
+            struct.pack("<f", float(height)),
+        )
+    )
+    return b"planner" + _build_header(fields) + payload
+
+
+class StationZMQPublisher:
+    def __init__(self, bind_host: str, port: int) -> None:
+        if zmq is None or np is None:
+            raise RuntimeError("pyzmq and numpy are required for Sonic Station ZMQ publishing")
+        self.bind_host = bind_host
+        self.port = port
+        self.endpoint = f"tcp://{bind_host}:{port}"
+        self._context = zmq.Context()
+        self._socket = self._context.socket(zmq.PUB)
+        self._lock = threading.Lock()
+        self._socket.bind(self.endpoint)
+
+    def close(self) -> None:
+        with self._lock:
+            self._socket.close(linger=0)
+            self._context.term()
+
+    def send_command(self, **kwargs: bool) -> None:
+        message = build_command_message(**kwargs)
+        with self._lock:
+            self._socket.send(message)
+
+    def send_planner(self, *, mode: int, movement: list[float], facing: list[float], speed: float, height: float = -1.0) -> None:
+        message = _build_planner_message(mode, movement, facing, speed, height)
+        with self._lock:
+            self._socket.send(message)
+
+    def stream_motion(
+        self,
+        motion_dir: Path,
+        *,
+        startup_delay: float,
+        repeat_command: int = 5,
+        repeat_command_interval: float = 0.05,
+        catch_up: bool = True,
+    ) -> None:
+        assert np is not None
+        joint_pos, joint_vel, body_quat = load_motion(motion_dir)
+        frame_indices = np.arange(joint_pos.shape[0], dtype=np.int64)
+        time.sleep(startup_delay)
+        for _ in range(repeat_command):
+            self.send_command(start=True, stop=False, planner=False)
+            time.sleep(repeat_command_interval)
+        pose_message = build_pose_message(joint_pos, joint_vel, body_quat, frame_indices, catch_up=catch_up)
+        with self._lock:
+            self._socket.send(pose_message)
+
+
 @dataclass
 class GenerationJob:
     id: str
@@ -312,28 +401,24 @@ def _resolve_motion_request(data: dict) -> tuple[str, str, str, str, float | Non
     raise ValueError(f"motion not found: {requested}")
 
 
-def _send_control_action(action: str, *, timeout: float = 3.0) -> subprocess.CompletedProcess[str]:
-    command = [
-        sys.executable,
-        str(STREAM_SCRIPT),
-        "--control-action",
-        action,
-        "--startup-delay",
-        "0.1",
-        "--repeat-command",
-        "8",
-        "--repeat-command-interval",
-        "0.04",
-    ]
-    return subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+def _publisher_or_raise() -> StationZMQPublisher:
+    if _ZMQ_PUBLISHER is None:
+        raise RuntimeError("Sonic Station ZMQ publisher is not available")
+    return _ZMQ_PUBLISHER
+
+
+def _send_control_action(action: str) -> None:
+    actions = {
+        "emergency_stop": dict(start=False, stop=True, planner=True),
+        "idle_reset": dict(start=False, stop=False, planner=True, idle_reset=True),
+        "motion_restart": dict(start=False, stop=False, planner=False, motion_restart=True),
+    }
+    if action not in actions:
+        raise ValueError(f"unknown control action: {action}")
+    publisher = _publisher_or_raise()
+    for _ in range(8):
+        publisher.send_command(**actions[action])
+        time.sleep(0.04)
 
 
 def _run_generation_job(job_id: str) -> None:
@@ -403,12 +488,12 @@ def _run_playback_job(playback_id: str) -> None:
         log_path = REPO_ROOT / log_path
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if not STREAM_SCRIPT.exists():
+    if _ZMQ_PUBLISHER is None:
         _update_playback(
             playback_id,
             status="failed",
             finished_at=time.time(),
-            error=f"missing stream script: {STREAM_SCRIPT}",
+            error="Sonic Station ZMQ publisher is not available",
             returncode=127,
         )
         return
@@ -417,16 +502,17 @@ def _run_playback_job(playback_id: str) -> None:
     with log_path.open("w", encoding="utf-8") as log:
         log.write(f"$ {' '.join(job.command)}\n\n")
         log.flush()
-        proc = subprocess.run(
-            job.command,
-            cwd=REPO_ROOT,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=False,
-        )
+        try:
+            motion_path = Path(job.motion_path)
+            if not motion_path.is_absolute():
+                motion_path = REPO_ROOT / motion_path
+            _ZMQ_PUBLISHER.stream_motion(motion_path, startup_delay=1.0)
+            returncode = 0
+        except Exception as exc:
+            log.write(f"\n{exc}\n")
+            returncode = 1
 
-    if proc.returncode == 0:
+    if returncode == 0:
         if job.auto_idle_reset:
             reset_delay = max(0.5, min(30.0, float(job.duration_sec or 6.0) + 0.5))
             with log_path.open("a", encoding="utf-8") as log:
@@ -436,26 +522,17 @@ def _run_playback_job(playback_id: str) -> None:
                 is_latest_playback = playback_id == _LATEST_PLAYBACK_ID
             if is_latest_playback:
                 try:
-                    reset_proc = _send_control_action("idle_reset")
+                    _send_control_action("idle_reset")
                     with log_path.open("a", encoding="utf-8") as log:
                         log.write("\n$ auto idle_reset\n")
-                        log.write(reset_proc.stdout)
-                    if reset_proc.returncode != 0:
-                        _update_playback(
-                            playback_id,
-                            status="failed",
-                            finished_at=time.time(),
-                            returncode=reset_proc.returncode,
-                            error=f"auto idle reset failed with exit code {reset_proc.returncode}",
-                        )
-                        return
-                except subprocess.TimeoutExpired:
+                        log.write("Control action streamed.\n")
+                except Exception as exc:
                     _update_playback(
                         playback_id,
                         status="failed",
                         finished_at=time.time(),
-                        returncode=124,
-                        error="auto idle reset timed out",
+                        returncode=1,
+                        error=f"auto idle reset failed: {exc}",
                     )
                     return
             else:
@@ -466,15 +543,15 @@ def _run_playback_job(playback_id: str) -> None:
             playback_id,
             status="succeeded",
             finished_at=time.time(),
-            returncode=proc.returncode,
+            returncode=returncode,
         )
     else:
         _update_playback(
             playback_id,
             status="failed",
             finished_at=time.time(),
-            returncode=proc.returncode,
-            error=f"playback stream failed with exit code {proc.returncode}",
+            returncode=returncode,
+            error=f"playback stream failed with exit code {returncode}",
         )
 
 
@@ -565,6 +642,7 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                         "/playbacks",
                         "/playbacks/<id>",
                         "/control/reset",
+                        "/teleop",
                         "/",
                         "/camera/status",
                         "/camera/latest.jpg",
@@ -648,6 +726,7 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                     "/jobs/<id>",
                     "/motion/play",
                     "/control/reset",
+                    "/teleop",
                     "/playbacks",
                     "/playbacks/<id>",
                     "/camera/status",
@@ -660,13 +739,13 @@ class SonicStationHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path not in ("/generate", "/motion/play", "/control/reset", "/camera/view"):
+        if path not in ("/generate", "/motion/play", "/control/reset", "/teleop", "/camera/view"):
             self._send_json(
                 {
                     "ok": False,
                     "error": "not_found",
                     "path": path,
-                    "available": ["/generate", "/motion/play", "/control/reset", "/camera/view"],
+                    "available": ["/generate", "/motion/play", "/control/reset", "/teleop", "/camera/view"],
                 },
                 HTTPStatus.NOT_FOUND,
             )
@@ -699,34 +778,66 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                 )
                 return
-            if not STREAM_SCRIPT.exists():
+            if _ZMQ_PUBLISHER is None:
                 self._send_json(
-                    {"ok": False, "error": "missing_stream_script", "path": str(STREAM_SCRIPT)},
+                    {"ok": False, "error": "zmq_publisher_unavailable"},
                     HTTPStatus.SERVICE_UNAVAILABLE,
                 )
                 return
 
             try:
-                proc = _send_control_action(action)
-            except subprocess.TimeoutExpired:
-                self._send_json(
-                    {"ok": False, "error": "control_timeout", "action": action},
-                    HTTPStatus.GATEWAY_TIMEOUT,
-                )
-                return
-            if proc.returncode != 0:
+                _send_control_action(action)
+            except Exception as exc:
                 self._send_json(
                     {
                         "ok": False,
                         "error": "control_failed",
                         "action": action,
-                        "returncode": proc.returncode,
-                        "output": proc.stdout[-2000:],
+                        "message": str(exc),
                     },
                     HTTPStatus.BAD_GATEWAY,
                 )
                 return
             self._send_json({"ok": True, "action": action})
+            return
+
+        if path == "/teleop":
+            if _ZMQ_PUBLISHER is None:
+                self._send_json({"ok": False, "error": "zmq_publisher_unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                active = bool(data.get("active", False))
+                movement = [float(value) for value in data.get("movement", [0.0, 0.0, 0.0])[:3]]
+                facing = [float(value) for value in data.get("facing", [1.0, 0.0, 0.0])[:3]]
+                speed = float(data.get("speed", -1.0))
+                height = float(data.get("height", -1.0))
+            except (TypeError, ValueError):
+                self._send_json(
+                    {"ok": False, "error": "bad_request", "message": "invalid teleop payload"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            if len(movement) != 3 or len(facing) != 3:
+                self._send_json(
+                    {"ok": False, "error": "bad_request", "message": "movement and facing must have 3 values"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            speed = max(-1.0, min(0.8, speed))
+            mode = SLOW_WALK if active and speed > 0.001 else IDLE
+            if not active:
+                movement = [0.0, 0.0, 0.0]
+                speed = -1.0
+            try:
+                _ZMQ_PUBLISHER.send_command(start=active, stop=False, planner=True)
+                _ZMQ_PUBLISHER.send_planner(mode=mode, movement=movement, facing=facing, speed=speed, height=height)
+            except Exception as exc:
+                self._send_json(
+                    {"ok": False, "error": "teleop_failed", "message": str(exc)},
+                    HTTPStatus.BAD_GATEWAY,
+                )
+                return
+            self._send_json({"ok": True, "active": active, "mode": mode, "speed": speed})
             return
 
         if path == "/motion/play":
@@ -855,6 +966,7 @@ class SonicStationHandler(BaseHTTPRequestHandler):
             "GET /camera/view ",
             "POST /camera/view ",
             "POST /control/reset ",
+            "POST /teleop ",
         )
         if any(path in message for path in quiet_paths):
             return
@@ -871,14 +983,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--camera-host", default="localhost")
     parser.add_argument("--camera-port", type=int, default=5555)
     parser.add_argument("--camera-view-file", type=Path, default=REPO_ROOT / ".sonic_station" / "camera_view.json")
+    parser.add_argument("--zmq-bind-host", default="*")
+    parser.add_argument("--zmq-port", type=int, default=5556)
     return parser.parse_args()
 
 
 def main() -> None:
-    global _CAMERA_STORE, _CAMERA_VIEW_STORE, _STATION_MODE, _ROBOT_INTERFACE
+    global _CAMERA_STORE, _CAMERA_VIEW_STORE, _ZMQ_PUBLISHER, _STATION_MODE, _ROBOT_INTERFACE
     args = parse_args()
     _STATION_MODE = args.station_mode
     _ROBOT_INTERFACE = args.robot_interface
+    _ZMQ_PUBLISHER = StationZMQPublisher(args.zmq_bind_host, args.zmq_port)
     if not args.camera_disabled:
         _CAMERA_STORE = CameraFrameStore(args.camera_host, args.camera_port)
         _CAMERA_STORE.start()
@@ -890,6 +1005,7 @@ def main() -> None:
     print(f"  motions: {url}/motions")
     print(f"  jobs:    {url}/jobs")
     print(f"  mode:    {args.station_mode}{(' on ' + args.robot_interface) if args.robot_interface else ''}")
+    print(f"  command: tcp://{args.zmq_bind_host}:{args.zmq_port}")
     if args.camera_disabled:
         print("  camera:  disabled")
     else:
@@ -901,6 +1017,8 @@ def main() -> None:
     finally:
         if _CAMERA_STORE is not None:
             _CAMERA_STORE.stop()
+        if _ZMQ_PUBLISHER is not None:
+            _ZMQ_PUBLISHER.close()
         server.server_close()
 
 

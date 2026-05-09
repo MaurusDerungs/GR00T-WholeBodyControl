@@ -12,6 +12,11 @@ const state = {
   cameraView: { azimuth: 135, elevation: -18, distance: 3, lookat: [0, 0, 0.75] },
   cameraDrag: null,
   cameraPostTimer: null,
+  teleopActive: false,
+  teleopSpeed: 0.4,
+  teleopYaw: 0,
+  teleopKeys: new Set(),
+  teleopHelpShown: false,
 };
 
 const el = {
@@ -22,8 +27,10 @@ const el = {
   playbackCount: document.querySelector("#playbackCount"),
   cameraStatus: document.querySelector("#cameraStatus"),
   cameraResetButton: document.querySelector("#cameraResetButton"),
+  simFrame: document.querySelector("#simFrame"),
   simImage: document.querySelector("#simImage"),
   simPlaceholder: document.querySelector("#simPlaceholder"),
+  teleopOverlay: document.querySelector("#teleopOverlay"),
   generateForm: document.querySelector("#generateForm"),
   promptInput: document.querySelector("#promptInput"),
   nameInput: document.querySelector("#nameInput"),
@@ -32,7 +39,7 @@ const el = {
   emergencyStopButton: document.querySelector("#emergencyStopButton"),
   idleResetButton: document.querySelector("#idleResetButton"),
   motionRestartButton: document.querySelector("#motionRestartButton"),
-  teleopHelpButton: document.querySelector("#teleopHelpButton"),
+  teleopToggleButton: document.querySelector("#teleopToggleButton"),
   teleopDialog: document.querySelector("#teleopDialog"),
   statusLog: document.querySelector("#statusLog"),
   generatedList: document.querySelector("#generatedList"),
@@ -180,6 +187,11 @@ function render() {
   renderMotionList(el.predefinedList, "predefined");
   renderActivityList(el.jobsList, state.jobs, "jobs");
   renderActivityList(el.playbacksList, state.playbacks, "playbacks");
+  el.teleopToggleButton.textContent = state.teleopActive
+    ? `Teleop On · ${state.teleopSpeed.toFixed(1)} m/s`
+    : "Teleop Off";
+  el.teleopToggleButton.setAttribute("aria-pressed", String(state.teleopActive));
+  document.body.classList.toggle("teleop-active", state.teleopActive);
 }
 
 async function refresh({ quiet = false } = {}) {
@@ -373,20 +385,132 @@ async function sendReset(action, label) {
   }
 }
 
+function unitFromYaw(yaw) {
+  return [Math.cos(yaw), Math.sin(yaw), 0];
+}
+
+function teleopPayload() {
+  const forward = unitFromYaw(state.teleopYaw);
+  let movement = [0, 0, 0];
+  let moving = false;
+  if (state.teleopKeys.has("w")) {
+    movement = forward;
+    moving = true;
+  } else if (state.teleopKeys.has("s")) {
+    movement = [-forward[0], -forward[1], 0];
+    moving = true;
+  } else if (state.teleopKeys.has(",")) {
+    movement = [-Math.sin(state.teleopYaw), Math.cos(state.teleopYaw), 0];
+    moving = true;
+  } else if (state.teleopKeys.has(".")) {
+    movement = [Math.sin(state.teleopYaw), -Math.cos(state.teleopYaw), 0];
+    moving = true;
+  }
+  return {
+    active: state.teleopActive,
+    movement,
+    facing: forward,
+    speed: state.teleopActive && moving ? state.teleopSpeed : -1,
+    height: -1,
+  };
+}
+
+async function sendTeleop() {
+  if (!state.teleopActive) return;
+  if (state.teleopKeys.has("q") || state.teleopKeys.has("a")) state.teleopYaw += 0.08;
+  if (state.teleopKeys.has("d")) state.teleopYaw -= 0.08;
+  try {
+    await api("/teleop", {
+      method: "POST",
+      body: JSON.stringify(teleopPayload()),
+    });
+  } catch (error) {
+    log(`/teleop: ${error.message}`);
+  }
+}
+
+async function setTeleopActive(active) {
+  state.teleopActive = active;
+  state.teleopKeys.clear();
+  render();
+  if (active) {
+    el.simFrame.focus();
+    if (!state.teleopHelpShown) {
+      state.teleopHelpShown = true;
+      el.teleopDialog.showModal();
+    }
+    log("Teleop enabled. Click the MuJoCo view and use W/S/Q/D.");
+  } else {
+    try {
+      await api("/teleop", {
+        method: "POST",
+        body: JSON.stringify({ active: false }),
+      });
+    } catch (error) {
+      log(`/teleop: ${error.message}`);
+    }
+    log("Teleop disabled.");
+  }
+}
+
+function onTeleopKeyDown(event) {
+  if (!state.teleopActive) return;
+  if (event.target !== el.simFrame && !el.simFrame.contains(event.target)) return;
+  const key = event.key.toLowerCase();
+  if (["w", "s", "q", "a", "d", ",", ".", " ", "9", "0", "escape"].includes(key)) {
+    event.preventDefault();
+  }
+  if (key === "escape") {
+    setTeleopActive(false);
+    return;
+  }
+  if (key === "9" && !event.repeat) {
+    state.teleopSpeed = clamp(state.teleopSpeed - 0.1, 0.2, 0.8);
+    render();
+    log(`Teleop speed: ${state.teleopSpeed.toFixed(1)} m/s`);
+    return;
+  }
+  if (key === "0" && !event.repeat) {
+    state.teleopSpeed = clamp(state.teleopSpeed + 0.1, 0.2, 0.8);
+    render();
+    log(`Teleop speed: ${state.teleopSpeed.toFixed(1)} m/s`);
+    return;
+  }
+  if (key === " ") {
+    state.teleopKeys.clear();
+    return;
+  }
+  state.teleopKeys.add(key);
+}
+
+function onTeleopKeyUp(event) {
+  if (!state.teleopActive) return;
+  state.teleopKeys.delete(event.key.toLowerCase());
+}
+
 el.generateForm.addEventListener("submit", generateMotion);
 el.refreshButton.addEventListener("click", () => refresh());
 el.emergencyStopButton.addEventListener("click", () => sendReset("emergency_stop", "Emergency stop"));
 el.idleResetButton.addEventListener("click", () => sendReset("idle_reset", "IDLE reset"));
 el.motionRestartButton.addEventListener("click", () => sendReset("motion_restart", "Motion restart"));
-el.teleopHelpButton.addEventListener("click", () => el.teleopDialog.showModal());
+el.teleopToggleButton.addEventListener("click", () => setTeleopActive(!state.teleopActive));
+el.teleopDialog.addEventListener("close", () => {
+  if (state.teleopActive) el.simFrame.focus();
+});
 el.cameraResetButton.addEventListener("click", resetCameraView);
-el.simImage.parentElement.addEventListener("pointerdown", onCameraPointerDown);
-el.simImage.parentElement.addEventListener("pointermove", onCameraPointerMove);
-el.simImage.parentElement.addEventListener("pointerup", onCameraPointerUp);
-el.simImage.parentElement.addEventListener("pointercancel", onCameraPointerUp);
-el.simImage.parentElement.addEventListener("wheel", onCameraWheel, { passive: false });
+el.simFrame.addEventListener("pointerdown", (event) => {
+  el.simFrame.focus();
+  onCameraPointerDown(event);
+});
+el.simFrame.addEventListener("pointermove", onCameraPointerMove);
+el.simFrame.addEventListener("pointerup", onCameraPointerUp);
+el.simFrame.addEventListener("pointercancel", onCameraPointerUp);
+el.simFrame.addEventListener("wheel", onCameraWheel, { passive: false });
+el.simFrame.addEventListener("keydown", onTeleopKeyDown);
+el.simFrame.addEventListener("keyup", onTeleopKeyUp);
 
 refresh({ quiet: true });
 refreshCameraImage();
 setInterval(() => refresh({ quiet: true }), 2500);
 setInterval(refreshCameraImage, 33);
+setInterval(sendTeleop, 50);

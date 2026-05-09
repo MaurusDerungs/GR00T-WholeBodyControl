@@ -25,7 +25,7 @@
         <button id="emergencyStopButton" class="danger emergency" type="button">Emergency Stop</button>
         <button id="idleResetButton" type="button">Reset to IDLE</button>
         <button id="motionRestartButton" type="button">Restart Motion</button>
-        <button id="teleopHelpButton" class="primary" type="button">Teleop</button>
+        <button id="teleopToggleButton" class="primary" type="button" aria-pressed="false">Teleop Off</button>
       </section>
 
       <section class="control-grid">
@@ -37,9 +37,10 @@
               <span id="cameraStatus" class="pill">waiting</span>
             </div>
           </div>
-          <div class="sim-frame">
+          <div class="sim-frame" id="simFrame" tabindex="0">
             <img id="simImage" alt="MuJoCo camera view" />
             <div id="simPlaceholder">Waiting for MuJoCo camera...</div>
+            <div id="teleopOverlay" class="teleop-overlay">Teleop active · click here and use W/S/Q/D · 9/0 speed</div>
           </div>
         </section>
 
@@ -121,19 +122,15 @@
           <button type="submit">Close</button>
         </div>
         <div class="teleop-body">
-          <p class="muted">Run this in a terminal while Sonic Station/deploy is active:</p>
-          <pre>python gear_sonic_deploy/scripts/run_wasd_planner.py --no-launch</pre>
+          <p class="muted">Teleop runs directly from this browser view. Click the MuJoCo view, then use the keys below.</p>
           <div class="teleop-grid">
             <span>W / S</span><strong>forward / backward</strong>
-            <span>A / D</span><strong>turn while moving</strong>
-            <span>Q / E</span><strong>rotate facing direction</strong>
+            <span>Q / D</span><strong>turn left / right</strong>
+            <span>A</span><strong>also turns left on QWERTY keyboards</strong>
             <span>9 / 0</span><strong>decrease / increase walking speed</strong>
             <span>, / .</span><strong>strafe left / right</strong>
             <span>Space</span><strong>stop walking</strong>
-            <span>1-6 + Enter</span><strong>trigger preset actions</strong>
-            <span>]</span><strong>request control start</strong>
-            <span>O</span><strong>stop deploy</strong>
-            <span>Esc</span><strong>quit teleop script</strong>
+            <span>Esc</span><strong>turn Teleop off</strong>
           </div>
         </div>
       </form>

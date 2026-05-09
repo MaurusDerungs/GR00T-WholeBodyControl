@@ -46,6 +46,7 @@ STATION_IDLE_SOURCE="${STATION_IDLE_SOURCE:-$DEPLOY_DIR/reference/example/neutra
 STATION_CAMERA_PORT="${STATION_CAMERA_PORT:-5560}"
 STATION_CAMERA_PORT_MAX="${STATION_CAMERA_PORT_MAX:-5599}"
 STATION_RESERVED_PORTS="${STATION_RESERVED_PORTS:-5556 5557 5558}"
+STATION_ZMQ_PORT="${STATION_ZMQ_PORT:-5556}"
 STATION_ENABLE_ONSCREEN="${STATION_ENABLE_ONSCREEN:-false}"
 STATION_IMAGE_DT="${STATION_IMAGE_DT:-0.016667}"
 STATION_START_UI="${STATION_START_UI:-true}"
@@ -141,6 +142,7 @@ if [[ "$STATION_START_UI" == "true" ]]; then
     --camera-host localhost \
     --camera-port "$STATION_CAMERA_PORT" \
     --camera-view-file "$STATION_CAMERA_VIEW_FILE" \
+    --zmq-port "$STATION_ZMQ_PORT" \
     $([[ "$STATION_MODE" == "real" ]] && printf '%s' "--camera-disabled") \
     >"$STATION_LOG_DIR/backend.log" 2>&1 &
   BACKEND_PID=$!
@@ -202,6 +204,7 @@ cd "$DEPLOY_DIR"
 DEPLOY_ARGS=(
   --motion-data "$STATION_MOTION_DATA"
   --input-type zmq_manager
+  --zmq-port "$STATION_ZMQ_PORT"
 )
 
 if [[ "$STATION_MODE" == "sim" ]]; then
