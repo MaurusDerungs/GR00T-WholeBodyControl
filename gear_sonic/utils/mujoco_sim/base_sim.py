@@ -6,6 +6,7 @@ BaseSimulator wraps DefaultEnv with rate-limiting and viewer/image update loops.
 """
 
 import os
+import json
 import pathlib
 from pathlib import Path
 import pickle
@@ -54,8 +55,18 @@ class DefaultEnv:
 
         if not camera_configs and offscreen and enable_image_publish:
             self.camera_configs = {
-                "ego_view": {"height": 480, "width": 640, "mjcf_name": "head_camera"},
+                "overview": {
+                    "height": 720,
+                    "width": 1280,
+                    "free_camera": {
+                        "azimuth": 135.0,
+                        "elevation": -18.0,
+                        "distance": 3.0,
+                        "lookat": [0.0, 0.0, 0.75],
+                    },
+                },
             }
+        self.camera_view_file = os.environ.get("SONIC_STATION_CAMERA_VIEW_FILE", "")
 
         self.reward_lock = Lock()
         self.unitree_bridge = None
@@ -250,11 +261,48 @@ class DefaultEnv:
 
     def init_renderers(self):
         self.renderers = {}
+        self.free_cameras = {}
         for camera_name, camera_config in self.camera_configs.items():
+            width = int(camera_config["width"])
+            height = int(camera_config["height"])
+            self.mj_model.vis.global_.offwidth = max(self.mj_model.vis.global_.offwidth, width)
+            self.mj_model.vis.global_.offheight = max(self.mj_model.vis.global_.offheight, height)
             renderer = mujoco.Renderer(
-                self.mj_model, height=camera_config["height"], width=camera_config["width"]
+                self.mj_model, height=height, width=width
             )
             self.renderers[camera_name] = renderer
+            if "free_camera" in camera_config:
+                self.free_cameras[camera_name] = self._create_free_camera(
+                    camera_config["free_camera"]
+                )
+
+    def _create_free_camera(self, params):
+        camera = mujoco.MjvCamera()
+        camera.type = mujoco.mjtCamera.mjCAMERA_FREE
+        camera.azimuth = float(params.get("azimuth", 135.0))
+        camera.elevation = float(params.get("elevation", -18.0))
+        camera.distance = float(params.get("distance", 3.0))
+        camera.lookat = np.array(params.get("lookat", [0.0, 0.0, 0.75]), dtype=np.float64)
+        return camera
+
+    def _update_station_camera_view(self):
+        if not self.camera_view_file or not self.free_cameras:
+            return
+        try:
+            with open(self.camera_view_file, "r", encoding="utf-8") as handle:
+                params = json.load(handle)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return
+
+        for camera in self.free_cameras.values():
+            if "azimuth" in params:
+                camera.azimuth = float(params["azimuth"])
+            if "elevation" in params:
+                camera.elevation = float(params["elevation"])
+            if "distance" in params:
+                camera.distance = float(params["distance"])
+            if "lookat" in params:
+                camera.lookat = np.array(params["lookat"], dtype=np.float64)
 
     def compute_body_torques(self) -> np.ndarray:
         # PD control: tau = tau_ff + kp * (q_des - q) + kd * (dq_des - dq)
@@ -479,10 +527,13 @@ class DefaultEnv:
         return {}
 
     def update_render_caches(self):
+        self._update_station_camera_view()
         render_caches = {}
         for camera_name, camera_config in self.camera_configs.items():
             renderer = self.renderers[camera_name]
-            if "params" in camera_config:
+            if camera_name in getattr(self, "free_cameras", {}):
+                renderer.update_scene(self.mj_data, camera=self.free_cameras[camera_name])
+            elif "params" in camera_config:
                 renderer.update_scene(self.mj_data, camera=camera_config["params"])
             elif "mjcf_name" in camera_config:
                 renderer.update_scene(self.mj_data, camera=camera_config["mjcf_name"])

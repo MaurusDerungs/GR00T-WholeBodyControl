@@ -213,6 +213,7 @@ show_usage() {
     echo "                          Wait before auto-loop playback starts"
     echo "  --auto-motion-playback-start-index INDEX"
     echo "                          Motion index to switch to when playback starts"
+    echo "  --auto-control-start    Automatically start control and hold the first frame"
     echo "  -y, --yes               Skip deployment confirmation prompt"
     echo "  --input-type TYPE       Set the input type (default: zmq_manager)"
     echo "  --output-type TYPE      Set the output type (default: ros2)"
@@ -251,6 +252,7 @@ ZMQ_HOST_DEFAULT="localhost"
 AUTO_MOTION_LOOP_DEFAULT="false"
 AUTO_MOTION_START_DELAY_DEFAULT="0"
 AUTO_MOTION_PLAYBACK_START_INDEX_DEFAULT="0"
+AUTO_CONTROL_START_DEFAULT="false"
 ASSUME_YES_DEFAULT="false"
 
 # Initialize with defaults (will be set after parsing)
@@ -264,6 +266,7 @@ ZMQ_HOST="$ZMQ_HOST_DEFAULT"
 AUTO_MOTION_LOOP="$AUTO_MOTION_LOOP_DEFAULT"
 AUTO_MOTION_START_DELAY="$AUTO_MOTION_START_DELAY_DEFAULT"
 AUTO_MOTION_PLAYBACK_START_INDEX="$AUTO_MOTION_PLAYBACK_START_INDEX_DEFAULT"
+AUTO_CONTROL_START="$AUTO_CONTROL_START_DEFAULT"
 ASSUME_YES="$ASSUME_YES_DEFAULT"
 
 # Parse arguments
@@ -324,6 +327,10 @@ while [[ $# -gt 0 ]]; do
             fi
             AUTO_MOTION_PLAYBACK_START_INDEX="$2"
             shift 2
+            ;;
+        --auto-control-start)
+            AUTO_CONTROL_START="true"
+            shift
             ;;
         -y|--yes)
             ASSUME_YES="true"
@@ -435,6 +442,10 @@ fi
 
 if [[ "$AUTO_MOTION_PLAYBACK_START_INDEX" != "0" ]]; then
     EXTRA_ARGS="$EXTRA_ARGS --auto-motion-playback-start-index $AUTO_MOTION_PLAYBACK_START_INDEX"
+fi
+
+if [[ "$AUTO_CONTROL_START" == "true" ]]; then
+    EXTRA_ARGS="$EXTRA_ARGS --auto-control-start"
 fi
 
 # ============================================================================
@@ -563,6 +574,7 @@ echo -e "  Motion Data:        ${GREEN}$MOTION_DATA${NC}"
 echo -e "  Auto Motion Loop:   ${GREEN}$AUTO_MOTION_LOOP${NC}"
 echo -e "  Auto Start Delay:   ${GREEN}${AUTO_MOTION_START_DELAY}s${NC}"
 echo -e "  Playback Index:     ${GREEN}${AUTO_MOTION_PLAYBACK_START_INDEX}${NC}"
+echo -e "  Auto Control Start: ${GREEN}$AUTO_CONTROL_START${NC}"
 echo -e "  Obs Config:         ${GREEN}$OBS_CONFIG${NC}"
 echo -e "  Planner:            ${GREEN}$PLANNER${NC}"
 echo -e "  Input Type:         ${GREEN}$INPUT_TYPE${NC}"

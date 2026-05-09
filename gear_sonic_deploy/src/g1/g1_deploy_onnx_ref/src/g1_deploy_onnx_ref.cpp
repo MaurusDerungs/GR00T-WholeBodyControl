@@ -324,6 +324,8 @@ class G1Deploy {
     std::chrono::steady_clock::time_point auto_motion_stable_start_time_;
     bool auto_motion_start_announced_ = false;
     bool auto_motion_playback_started_ = false;
+    bool auto_control_start_ = false;
+    bool auto_control_start_announced_ = false;
     
     // =========================================================================
     // Initial compliance values for VR 3-point control (set from command line)
@@ -2171,7 +2173,8 @@ class G1Deploy {
       double initial_max_close_ratio = 1.0,
       bool auto_motion_loop = false,
       double auto_motion_start_delay_sec = 0.0,
-      int auto_motion_playback_start_index = 0)
+      int auto_motion_playback_start_index = 0,
+      bool auto_control_start = false)
       : time_(0.0),
         publish_dt_(0.002),
         control_dt_(0.02),
@@ -2190,6 +2193,7 @@ class G1Deploy {
         auto_motion_loop_(auto_motion_loop),
         auto_motion_start_delay_sec_(std::max(0.0, auto_motion_start_delay_sec)),
         auto_motion_playback_start_index_(std::max(0, auto_motion_playback_start_index)),
+        auto_control_start_(auto_control_start),
         initial_vr_3point_compliance_(initial_compliance),
         initial_max_close_ratio_(initial_max_close_ratio),
         //env(ORT_LOGGING_LEVEL_WARNING, "G1Deploy"),
@@ -3498,6 +3502,15 @@ class G1Deploy {
                                       reinitialize_heading_, heading_state_buffer_, has_planner, planner_state, movement_state_buffer_, current_motion_mutex_, report_temperature_);
       }
 
+      if (auto_control_start_ && program_state_ == ProgramState::WAIT_FOR_CONTROL) {
+        operator_state.start = true;
+        operator_state.play = false;
+        if (!auto_control_start_announced_) {
+          auto_control_start_announced_ = true;
+          std::cout << "Auto control start requested; holding reference frame until playback input arrives." << std::endl;
+        }
+      }
+
       if (auto_motion_loop_ && !motion_reader_.motions.empty()) {
         const auto now = std::chrono::steady_clock::now();
         if (program_state_ == ProgramState::CONTROL && !auto_motion_control_timer_started_) {
@@ -4253,6 +4266,7 @@ int main(int argc, char const* argv[]) {
     std::cout << "  --logs-dir <path>: optional logs output base directory (default: logs/<timestamp>/)" << std::endl;
     std::cout << "  --enable-csv-logs: enable writing CSV logs (default: OFF)" << std::endl;
     std::cout << "  --enable-motion-recording: enable motion recording for ZMQ/planner (default: OFF)" << std::endl;
+    std::cout << "  --auto-control-start: automatically enter CONTROL and hold the current reference frame" << std::endl;
     std::cout << "  --auto-motion-loop: automatically play reference motions forever, cycling to the next motion at each end" << std::endl;
     std::cout << "  --auto-motion-start-delay <seconds>: hold frame 0 before auto-loop playback starts (default: 0)" << std::endl;
     std::cout << "  --auto-motion-playback-start-index <index>: motion index to switch to when delayed playback starts (default: 0)" << std::endl;
@@ -4301,6 +4315,7 @@ int main(int argc, char const* argv[]) {
   bool zmq_conflate = false;  // default off; enable with --zmq-conflate
   bool zmq_verbose = false;
   bool enableMotionRecording = false;  // default off; enable with --enable-motion-recording
+  bool autoControlStart = false;
   bool autoMotionLoop = false;
   double autoMotionStartDelaySec = 0.0;
   int autoMotionPlaybackStartIndex = 0;
@@ -4485,6 +4500,9 @@ int main(int argc, char const* argv[]) {
     } else if (std::string(argv[i]) == "--enable-motion-recording") {
       enableMotionRecording = true;
       std::cout << "[INFO] Motion recording enabled" << std::endl;
+    } else if (std::string(argv[i]) == "--auto-control-start") {
+      autoControlStart = true;
+      std::cout << "[INFO] Auto control start enabled" << std::endl;
     } else if (std::string(argv[i]) == "--auto-motion-loop") {
       autoMotionLoop = true;
       std::cout << "[INFO] Auto motion loop enabled" << std::endl;
@@ -4603,7 +4621,8 @@ int main(int argc, char const* argv[]) {
     initial_max_close_ratio,
     autoMotionLoop,
     autoMotionStartDelaySec,
-    autoMotionPlaybackStartIndex
+    autoMotionPlaybackStartIndex,
+    autoControlStart
   );
   std::cout << "[DEBUG] G1Deploy object created successfully!" << std::endl;
   

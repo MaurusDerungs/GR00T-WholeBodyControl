@@ -90,6 +90,7 @@ def override_wbc_config(
         "hand_torque_limit": config.hand_torque_limit,
         "enable_natural_walk": config.enable_natural_walk,
         "AUTO_DISABLE_ELASTIC_AFTER_CMD_SEC": config.auto_disable_elastic_after_cmd_sec,
+        "IMAGE_DT": config.image_dt,
     }
 
     if missed_keys_only:
@@ -139,6 +140,9 @@ class BaseConfig(ArgsConfigTemplate):
 
     sim_frequency: int = 200
     """Frequency of the simulation loop."""
+
+    image_dt: float = 0.033333
+    """Image publish interval in seconds."""
 
     # Robot Configuration
     enable_waist: bool = True

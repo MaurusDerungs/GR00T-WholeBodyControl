@@ -1,0 +1,372 @@
+:root {
+  color-scheme: dark;
+  --bg: #111416;
+  --panel: #1b2024;
+  --panel-2: #232a2f;
+  --line: #333c43;
+  --text: #eef2f4;
+  --muted: #9ba7ad;
+  --good: #69d28f;
+  --warn: #e7bd58;
+  --bad: #ed7b7b;
+  --accent: #7bc7d9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #2a3339;
+  color: var(--text);
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+button.primary {
+  background: #1d5d6b;
+  border-color: #27859a;
+}
+
+button.danger {
+  background: #7b1d24;
+  border-color: #d84c57;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.shell {
+  width: min(1480px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 20px 0 28px;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 720;
+}
+
+h2 {
+  font-size: 15px;
+  font-weight: 680;
+}
+
+.topbar p,
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.status-strip span,
+.pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.status-strip .mode-sim {
+  border-color: #27859a;
+  color: #b8edf5;
+}
+
+.status-strip .mode-real {
+  border-color: #d84c57;
+  background: #3a1116;
+  color: #ffd6da;
+  font-weight: 760;
+}
+
+.real-mode .topbar {
+  border-bottom-color: #7b1d24;
+}
+
+.control-grid,
+.activity-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 0.8fr);
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.motion-layout {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.panel-head {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prompt-panel,
+.log-panel {
+  min-height: 236px;
+}
+
+.sim-panel {
+  grid-row: span 2;
+  min-height: 650px;
+}
+
+.sim-frame {
+  position: relative;
+  height: 598px;
+  margin: 0;
+  overflow: hidden;
+  background: #080b0d;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.sim-frame:active {
+  cursor: grabbing;
+}
+
+.sim-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+#simPlaceholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 16px;
+  text-align: center;
+}
+
+.has-camera #simPlaceholder {
+  display: none;
+}
+
+textarea,
+input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #111619;
+  color: var(--text);
+  outline: none;
+}
+
+textarea {
+  display: block;
+  min-height: 116px;
+  resize: vertical;
+  padding: 12px;
+  margin: 12px;
+  width: calc(100% - 24px);
+  line-height: 1.45;
+}
+
+input {
+  height: 38px;
+  padding: 0 10px;
+  margin-top: 6px;
+}
+
+textarea:focus,
+input:focus {
+  border-color: var(--accent);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+pre {
+  margin: 0;
+  height: 183px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+  color: #cdd6da;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.motion-list,
+.activity-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.motion-item,
+.activity-item {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 10px;
+}
+
+.motion-title,
+.activity-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: start;
+}
+
+.motion-title strong,
+.activity-title strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.motion-meta,
+.activity-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.motion-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.status-succeeded {
+  color: var(--good);
+}
+
+.status-running,
+.status-queued {
+  color: var(--warn);
+}
+
+.status-failed {
+  color: var(--bad);
+}
+
+.empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 10px;
+}
+
+@media (max-width: 980px) {
+  .control-grid,
+  .activity-grid,
+  .motion-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .status-strip {
+    justify-content: flex-start;
+  }
+
+  .sim-panel {
+    min-height: 360px;
+  }
+
+  .sim-frame {
+    height: min(62vw, 520px);
+    min-height: 280px;
+  }
+}
+
+@media (max-width: 560px) {
+  .shell {
+    width: min(100vw - 20px, 1480px);
+    padding-top: 12px;
+  }
+
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+}

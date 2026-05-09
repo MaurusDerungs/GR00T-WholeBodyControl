@@ -200,6 +200,7 @@ uv.lock
 .venv_data_collection/
 .venv_camera/
 .venv_inference/
+.venv_kimodo/
 
 # XRoboToolkit-PC-Service-Pybind
 xrobotoolkit_sdk.cpython-*-*-*.so
@@ -218,4 +219,10 @@ models/
 
 # Downloaded from HuggingFace (hf download)
 sample_data/
+
+# Local Kimodo / SONIC Station generated outputs
+kimodo_outputs/
+gear_sonic_deploy/reference/kimodo/
+gear_sonic_deploy/reference/station_idle/
+.sonic_station/
 sonic_release/

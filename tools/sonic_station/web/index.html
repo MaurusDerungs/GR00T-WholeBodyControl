@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SONIC Station</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>SONIC Station</h1>
+          <p id="healthText">Connecting...</p>
+        </div>
+        <div class="status-strip">
+          <span id="stationMode">mode unknown</span>
+          <span id="motionCount">0 motions</span>
+          <span id="jobCount">0 jobs</span>
+          <span id="playbackCount">0 playbacks</span>
+        </div>
+      </header>
+
+      <section class="control-grid">
+        <section class="panel sim-panel">
+          <div class="panel-head">
+            <h2>MuJoCo View</h2>
+            <div class="panel-actions">
+              <button id="cameraResetButton" type="button">Reset View</button>
+              <span id="cameraStatus" class="pill">waiting</span>
+            </div>
+          </div>
+          <div class="sim-frame">
+            <img id="simImage" alt="MuJoCo camera view" />
+            <div id="simPlaceholder">Waiting for MuJoCo camera...</div>
+          </div>
+        </section>
+
+        <form id="generateForm" class="panel prompt-panel">
+          <div class="panel-head">
+            <h2>Prompt</h2>
+            <button type="submit">Generate</button>
+          </div>
+          <textarea
+            id="promptInput"
+            rows="5"
+            placeholder="A Unitree G1 robot does a smooth disco dance with arm waves."
+          ></textarea>
+          <div class="form-row">
+            <label>
+              Name
+              <input id="nameInput" type="text" placeholder="disco_dance" />
+            </label>
+            <label>
+              Duration
+              <input id="durationInput" type="number" min="1" max="30" step="0.5" value="6" />
+            </label>
+          </div>
+        </form>
+
+        <section class="panel log-panel">
+          <div class="panel-head">
+            <h2>Status</h2>
+            <button id="refreshButton" type="button">Refresh</button>
+          </div>
+          <pre id="statusLog">Ready.</pre>
+        </section>
+      </section>
+
+      <section class="motion-layout">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Generated</h2>
+          </div>
+          <div id="generatedList" class="motion-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Curated</h2>
+          </div>
+          <div id="curatedList" class="motion-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Predefined</h2>
+          </div>
+          <div id="predefinedList" class="motion-list"></div>
+        </section>
+      </section>
+
+      <section class="activity-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Generation Jobs</h2>
+          </div>
+          <div id="jobsList" class="activity-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Playbacks</h2>
+          </div>
+          <div id="playbacksList" class="activity-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
