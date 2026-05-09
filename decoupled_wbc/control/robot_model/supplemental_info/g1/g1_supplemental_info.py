@@ -130,7 +130,7 @@ class G1SupplementalInfo(RobotSupplementalInfo):
             "left_wrist_yaw_joint": [-1.614429558, 1.614429558],
             # Right arm
             "right_shoulder_pitch_joint": [-3.0892, 2.6704],
-            "right_shoulder_roll_joint": [-2.2515, -0.19],
+            "right_shoulder_roll_joint": [-2.2515, 0.5],
             "right_shoulder_yaw_joint": [-2.618, 2.618],
             "right_elbow_joint": [-1.0472, 2.0944],
             "right_wrist_roll_joint": [-1.972222054, 1.972222054],

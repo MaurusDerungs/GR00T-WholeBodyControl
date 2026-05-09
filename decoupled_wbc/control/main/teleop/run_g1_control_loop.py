@@ -109,6 +109,53 @@ def main(config: ControlLoopConfig):
 
     upper_body_policy_subscriber = ROSMsgSubscriber(CONTROL_GOAL_TOPIC)
 
+    # Compute right-arm indices within the upper-body joint array once.
+    # The upper-body array is [waist, left_arm, right_arm] = 17 joints (no hands).
+    # We freeze the right arm to an extended-down pose (not teleoperated).
+    # Right arm joint order: pitch, roll, yaw, elbow, wrist_roll, wrist_pitch, wrist_yaw
+    # For a truly straight-down arm: all zeros.
+    # The URDF shoulder joint frames have ±0.27931 rad offsets that cancel at roll=0,
+    # so all-zeros gives a perfectly straight hanging arm.
+    # Note: The supplemental_info upper limit for right_shoulder_roll was -0.19, which
+    # blocked roll=0. We relaxed it to 0.5 so the arm can hang straight.
+    # The override is applied AFTER the policy's get_action() so it wins over any
+    # interpolation state (including goals sent without target_time that would be
+    # silently dropped and leave stale values).
+    # The JointSafetyMonitor applies a 2s ramp from the initial observed position
+    # toward this target on startup, giving a smooth transition on launch.
+    _ra_indices = robot_model.get_joint_group_indices("right_arm")
+    _la_indices = robot_model.get_joint_group_indices("left_arm")
+    import numpy as _np
+    # Right arm extended downwards (not teleoperated).
+    # Joint order: [pitch, roll, yaw, elbow, wrist_roll, wrist_pitch, wrist_yaw]
+    #   elbow=π/2 unfolds the forearm so the arm hangs straight down.
+    _RIGHT_ARM_DOWN = _np.array(
+        [0.0, 0.0, 0.0, _np.pi / 2.0, 0.0, 0.0, 0.0], dtype=_np.float64
+    )
+
+    # ── Debug logging setup ─────────────────────────────────────────────
+    # Print arm commands and observed joint states periodically so we can
+    # compare what we're commanding vs what the robot actually reports.
+    _ARM_JOINT_LABELS = ["pitch", "roll ", "yaw  ", "elbow", "wr_r ", "wr_p ", "wr_y "]
+    _ra_joint_names = [robot_model.joint_names[i] for i in _ra_indices]
+    _la_joint_names = [robot_model.joint_names[i] for i in _la_indices]
+    print(f"[DEBUG] right_arm indices (in full q): {list(_ra_indices)}", flush=True)
+    print(f"[DEBUG] left_arm  indices (in full q): {list(_la_indices)}", flush=True)
+    print(f"[DEBUG] right_arm joint names (order): {_ra_joint_names}", flush=True)
+    print(f"[DEBUG] left_arm  joint names (order): {_la_joint_names}", flush=True)
+    print(
+        f"[DEBUG] right_arm joint limits: "
+        f"{[robot_model.supplemental_info.joint_limits.get(n) for n in _ra_joint_names]}",
+        flush=True,
+    )
+    print(
+        f"[DEBUG] left_arm  joint limits: "
+        f"{[robot_model.supplemental_info.joint_limits.get(n) for n in _la_joint_names]}",
+        flush=True,
+    )
+    _debug_every_n_steps = int(config.control_frequency)  # ≈ once per second
+    _debug_step = 0
+
     last_teleop_cmd = None
     try:
         while ros_manager.ok():
@@ -138,6 +185,10 @@ def main(config: ControlLoopConfig):
                             env.set_ik_indicator(upper_body_cmd)
                     # Send goal to policy
                     if wbc_goal:
+                        # Add target_time if missing so InterpolationPolicy does not silently
+                        # ignore the goal (it returns immediately when target_time is absent).
+                        if "target_time" not in wbc_goal:
+                            wbc_goal["target_time"] = t_now + (1.0 / config.control_frequency)
                         wbc_goal["interpolation_garbage_collection_time"] = t_now - 2 * (
                             1 / config.control_frequency
                         )
@@ -146,6 +197,52 @@ def main(config: ControlLoopConfig):
                 # Measure policy action calculation time
                 with telemetry.timer("policy_action"):
                     wbc_action = wbc_policy.get_action(time=t_now)
+
+                # Right arm is not teleoperated — lock it to arm-down position.
+                # Applied AFTER the policy so it overrides whatever the interpolation
+                # policy produced (including stale values from dropped goals).
+                # The safety monitor handles the 2s startup ramp from the initial
+                # observed position to this target.
+                wbc_action["q"][_ra_indices] = _RIGHT_ARM_DOWN
+
+                # ── Debug: print commands and observed joint states periodically ──
+                if _debug_step % _debug_every_n_steps == 0:
+                    _ra_cmd = wbc_action["q"][_ra_indices]
+                    _la_cmd = wbc_action["q"][_la_indices]
+                    _ra_obs = obs["q"][_ra_indices] if "q" in obs else None
+                    _la_obs = obs["q"][_la_indices] if "q" in obs else None
+
+                    def _fmt(arr):
+                        if arr is None:
+                            return "n/a"
+                        return "[" + ", ".join(f"{v:+.3f}" for v in arr) + "]"
+
+                    print(f"\n[DEBUG t={_debug_step/config.control_frequency:5.1f}s]", flush=True)
+                    print(f"  labels      : [{', '.join(_ARM_JOINT_LABELS)}]", flush=True)
+                    # Did we receive a teleop message this frame?
+                    print(
+                        f"  teleop msg  : {'YES' if upper_body_cmd else 'no'}  "
+                        f"(keys: {list(upper_body_cmd.keys()) if upper_body_cmd else []})",
+                        flush=True,
+                    )
+                    # If teleop data is present, show its upper-body portion (waist+left+right = 17 entries)
+                    if upper_body_cmd and "target_upper_body_pose" in upper_body_cmd:
+                        _tgt = _np.asarray(upper_body_cmd["target_upper_body_pose"]).flatten()
+                        if _tgt.size >= 17:
+                            # Upper body layout: waist(3) + left_arm(7) + right_arm(7)
+                            print(f"  teleop left : {_fmt(_tgt[3:10])}", flush=True)
+                            print(f"  teleop right: {_fmt(_tgt[10:17])}", flush=True)
+                    print(f"  RIGHT cmd   : {_fmt(_ra_cmd)}", flush=True)
+                    print(f"  RIGHT obs   : {_fmt(_ra_obs)}", flush=True)
+                    if _ra_obs is not None:
+                        _ra_err = _ra_cmd - _ra_obs
+                        print(f"  RIGHT err   : {_fmt(_ra_err)}  (cmd - obs)", flush=True)
+                    print(f"  LEFT  cmd   : {_fmt(_la_cmd)}", flush=True)
+                    print(f"  LEFT  obs   : {_fmt(_la_obs)}", flush=True)
+                    if _la_obs is not None:
+                        _la_err = _la_cmd - _la_obs
+                        print(f"  LEFT  err   : {_fmt(_la_err)}  (cmd - obs)", flush=True)
+                _debug_step += 1
 
                 # Measure action queue time
                 with telemetry.timer("queue_action"):
