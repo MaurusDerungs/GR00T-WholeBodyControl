@@ -4,7 +4,12 @@ import numpy as np
 
 from decoupled_wbc.control.teleop.pre_processor.pre_processor import PreProcessor
 
-RIGHT_HAND_ROTATION = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+# 180° rotation around Y (not Z): the right arm EE frame is mirrored about the sagittal
+# plane, so its +X axis points UP while the left EE's -X points UP.  Mapping "lift" through
+# hand_rotation_correction (which gives -EE_X for left) would give the same -EE_X for right,
+# landing the robot arm going DOWN.  The 180°-around-Y mirror instead maps "lift" to +EE_X,
+# which is the correct "up" direction for the mirrored right-arm frame.
+RIGHT_HAND_ROTATION = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]])
 
 
 class WristsPreProcessor(PreProcessor):
@@ -69,8 +74,8 @@ class WristsPreProcessor(PreProcessor):
             # local frame with hardcoded rotations since we don't have a common
             # reference frame for teleop and robot.
             self.init_teleop_T_init_ee[ee_name] = np.eye(4)
-            if control_device in {"pico", "quest", "oculus"}:
-                # poses are already expressed in a robot-aligned frame; no extra rotation needed
+            if control_device == "pico":
+                # TODO: add pico wrist calibration respect to the headset frame
                 pass
             else:
                 if ee_name == self.robot.supplemental_info.hand_frame_names["left"]:

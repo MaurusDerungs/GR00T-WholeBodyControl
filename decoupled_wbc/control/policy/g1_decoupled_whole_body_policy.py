@@ -95,7 +95,7 @@ class G1DecoupledWholeBodyPolicy(Policy):
         # When in keyboard mode, no timeout needed (user controls directly)
         if self.is_in_teleop_mode:
             time_since_goal = current_time - self.last_goal_time
-            if time_since_goal > 1.0:  # 1 second timeout
+            if time_since_goal > 2.0:  # 2 second timeout (gives ADB reconnect margin)
                 print(
                     f"SAFETY: Teleop mode timeout after {time_since_goal:.1f}s, injecting safe goal"
                 )

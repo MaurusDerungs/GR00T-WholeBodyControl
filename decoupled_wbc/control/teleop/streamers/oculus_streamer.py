@@ -93,9 +93,21 @@ class OculusStreamer(BaseStreamer):
     # ------------------------------------------------------------------
 
     def _read_loop(self):
+        import concurrent.futures
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        _READ_TIMEOUT = 1.5  # seconds — longer than the WBC watchdog won't help, so keep short
+
         while self._running:
             try:
-                poses, buttons = self._reader.get_transformations_and_buttons()
+                future = executor.submit(self._reader.get_transformations_and_buttons)
+                try:
+                    poses, buttons = future.result(timeout=_READ_TIMEOUT)
+                except concurrent.futures.TimeoutError:
+                    print("[OculusStreamer] read timeout — Quest may be sleeping or USB disconnected")
+                    time.sleep(0.1)
+                    continue
+
                 with self._lock:
                     T_r = poses.get("r")
                     T_l = poses.get("l")
