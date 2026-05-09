@@ -422,6 +422,44 @@ class GrootDataCollector:
             return
 
         try:
+            # ── Protocol v4: Quest/WBC mode (token_state, no smpl_joints) ─────
+            if "token_state" in pose_data and "smpl_joints" not in pose_data:
+                token_state = np.asarray(pose_data["token_state"], dtype=np.float32).flatten()
+                if token_state.size < 64:
+                    token_state = np.pad(token_state, (0, 64 - token_state.size))
+                token_state = token_state[:64]
+
+                left_hand_joints = self._extract_hand_joints(pose_data, "left_hand_joints")
+                right_hand_joints = self._extract_hand_joints(pose_data, "right_hand_joints")
+
+                body_quat_w = None
+                if "body_quat_w" in pose_data:
+                    body_quat_w = np.asarray(pose_data["body_quat_w"], dtype=np.float32).flatten()
+
+                frame_index = None
+                if "frame_index" in pose_data:
+                    frame_index = np.array([pose_data["frame_index"].flat[0]], dtype=np.int64)
+
+                self.latest_sonic_msg = {
+                    # Quest-specific
+                    "token_state": token_state,
+                    # Shared hand-joint fields
+                    "left_hand_joints": left_hand_joints,
+                    "right_hand_joints": right_hand_joints,
+                    "body_quat_w": body_quat_w,
+                    "frame_index": frame_index,
+                    # Fill SMPL fields with zeros so existing code paths stay intact
+                    "smpl_joints": None,
+                    "smpl_pose": np.zeros(63, dtype=np.float32),
+                    "left_wrist_joints": np.zeros(3, dtype=np.float32),
+                    "right_wrist_joints": np.zeros(3, dtype=np.float32),
+                    "vr_3pt_position": None,
+                    "vr_3pt_orientation": None,
+                    "receive_timestamp": time.time(),
+                }
+                return
+
+            # ── Legacy PICO / SMPL modes ──────────────────────────────────────
             if "smpl_joints" not in pose_data or len(pose_data["smpl_joints"].shape) != 3:
                 return
 
@@ -671,6 +709,60 @@ class GrootDataCollector:
         frame_data["teleop.stream_mode"] = np.array([self.current_stream_mode], dtype=np.int32)
 
         smpl_msg = self.latest_sonic_msg
+
+        # ── Quest/WBC mode (stream_mode == 6) ─────────────────────────────────
+        # Token and hand joints come directly from the v4 pose message; SMPL
+        # fields are zeroed because Quest has no full-body skeleton tracking.
+        if self.current_stream_mode == 6 and smpl_msg is not None:
+            receive_ts = smpl_msg.get("receive_timestamp")
+            if receive_ts is not None:
+                sonic_latency_ms = (time.time() - receive_ts) * 1000
+
+            # Motion token: provided by MotionTokenEncoder in the control loop
+            token_state = smpl_msg.get("token_state")
+            if token_state is not None and token_state.size == 64:
+                frame_data["action.motion_token"] = token_state.astype(np.float64)
+            else:
+                frame_data["action.motion_token"] = np.zeros(64, dtype=np.float64)
+
+            frame_data["teleop.left_hand_joints"] = smpl_msg["left_hand_joints"].astype(np.float32)
+            frame_data["teleop.right_hand_joints"] = smpl_msg["right_hand_joints"].astype(np.float32)
+
+            # SMPL-derived fields: zeroed (not available from Quest)
+            frame_data["teleop.smpl_joints"] = np.zeros(72, dtype=np.float32)
+            frame_data["teleop.smpl_pose"] = np.zeros(63, dtype=np.float32)
+            frame_data["teleop.left_wrist_joints"] = np.zeros(3, dtype=np.float32)
+            frame_data["teleop.right_wrist_joints"] = np.zeros(3, dtype=np.float32)
+            frame_data["teleop.smpl_frame_index"] = (
+                smpl_msg["frame_index"] if smpl_msg.get("frame_index") is not None
+                else np.array([0], dtype=np.int64)
+            )
+
+            body_quat_w = smpl_msg.get("body_quat_w")
+            if body_quat_w is not None:
+                frame_data["teleop.body_quat_w"] = body_quat_w.astype(np.float32)
+                frame_data["teleop.target_body_orientation"] = self._compute_target_body_orientation(
+                    body_quat_w, frame_data
+                )
+            else:
+                frame_data["teleop.body_quat_w"] = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+                frame_data["teleop.target_body_orientation"] = quat_to_rot6d(
+                    np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+                )
+
+            # Planner / navigation fields: zeroed (Quest drives the WBC directly)
+            frame_data["teleop.planner_mode"] = np.array([0], dtype=np.int32)
+            frame_data["teleop.planner_movement"] = np.zeros(3, dtype=np.float32)
+            frame_data["teleop.planner_facing"] = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+            frame_data["teleop.planner_speed"] = np.array([-1.0], dtype=np.float32)
+            frame_data["teleop.planner_height"] = np.array([-1.0], dtype=np.float32)
+            frame_data["teleop.vr_3pt_position"] = np.zeros(9, dtype=np.float32)
+            frame_data["teleop.vr_3pt_orientation"] = np.zeros(18, dtype=np.float32)
+            frame_data["teleop.delta_heading"] = np.zeros(1, dtype=np.float64)
+
+            return sonic_latency_ms
+
+        # ── Legacy PICO / SMPL modes (unchanged below) ────────────────────────
         use_smpl = False
         if self.current_stream_mode in (1, 4) and smpl_msg is not None:
             receive_ts = smpl_msg.get("receive_timestamp")

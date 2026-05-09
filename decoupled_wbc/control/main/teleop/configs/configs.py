@@ -144,16 +144,25 @@ class BaseConfig(ArgsConfigTemplate):
     """Joint groups to apply gravity compensation to (e.g., ['arms', 'left_arm', 'right_arm'])."""
     # Teleop/Device Configuration
     body_control_device: str = "dummy"
-    """Device to use for body control. Options: dummy, vive, iphone, leapmotion, joycon."""
+    """Device to use for body control. Options: dummy, vive, quest, oculus, iphone, leapmotion, joycon."""
 
     hand_control_device: Optional[str] = "dummy"
-    """Device to use for hand control. Options: None, manus, joycon, iphone."""
+    """Device to use for hand control. Options: None, manus, joycon, iphone, pico, quest."""
 
     body_streamer_ip: str = "10.112.210.229"
     """IP address for body streamer (vive only)."""
 
+    body_streamer_port: int = 5555
+    """Port for network streamers such as Vive."""
+
     body_streamer_keyword: str = "knee"
     """Body streamer keyword (vive only)."""
+
+    quest_bridge_host: str = "127.0.0.1"
+    """Host running the local Quest HTTPS bridge service."""
+
+    quest_bridge_port: int = 8765
+    """Port used by the local Quest HTTPS bridge service."""
 
     enable_visualization: bool = False
     """Whether to enable visualization."""
@@ -186,6 +195,26 @@ class BaseConfig(ArgsConfigTemplate):
 
     upper_body_operation_mode: Literal["teleop", "inference"] = "teleop"
     """Upper body operation mode"""
+
+    # ── SONIC / data-collection ZMQ ──────────────────────────────────────
+    enable_sonic_data_collection: bool = False
+    """Publish g1_debug + pose-v4 ZMQ topics so run_data_exporter.py can record
+    GR00T-compatible training data without the C++ SONIC binary."""
+
+    sonic_zmq_state_port: int = 5557
+    """ZMQ PUB port for the g1_debug robot-state topic (read by run_data_exporter)."""
+
+    sonic_zmq_pose_port: int = 5556
+    """ZMQ PUB port for the pose-v4 / manager_state topics (read by run_data_exporter)."""
+
+    sonic_encoder_checkpoint: Optional[str] = None
+    """Path to a MotionBricks VQ-VAE .ckpt file used to encode joint state into 64-D
+    motion tokens.  When None the standing-pose fallback token is used (sufficient
+    for lower-body-stationary manipulation tasks)."""
+
+    sonic_encoder_config_dir: Optional[str] = None
+    """Directory containing the Hydra config.yaml for the MotionBricks checkpoint.
+    Auto-detected from the checkpoint path when None."""
 
     def __post_init__(self):
         # Resolve interface (handles sim/real shortcuts, platform differences, and error handling)

@@ -394,6 +394,19 @@ class ComposedCameraSensor(Sensor, SensorServer):
                 config=usb_config, mount_position=mount_position, device_index=device_idx
             )
 
+        elif camera_type == "gstreamer":
+            from gear_sonic.camera.drivers.gstreamer_camera import (
+                GStreamerCameraConfig,
+                GStreamerCameraSensor,
+            )
+
+            gst_config = GStreamerCameraConfig()
+            udp_port = int(device_id) if device_id else 5000
+            print(f"Initializing GStreamer camera on UDP port {udp_port}")
+            return GStreamerCameraSensor(
+                config=gst_config, mount_position=mount_position, port=udp_port
+            )
+
         else:
             raise ValueError(f"Unsupported camera type: {camera_type}")
 

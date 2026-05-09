@@ -62,10 +62,35 @@ echo "[INFO] Creating .venv_data_collection with uv-managed Python 3.10 …"
 uv venv .venv_data_collection --python "$MANAGED_PY" --prompt gear_sonic_data_collection
 # shellcheck disable=SC1091
 source .venv_data_collection/bin/activate
-echo "[INFO] Installing gear_sonic[data_collection] (this may take a few minutes) …"
+# UV_PYTHON in the Docker image points to /root/venv — unset so uv respects VIRTUAL_ENV.
+unset UV_PYTHON
+
+echo "[INFO] Installing core data-collection packages …"
+# Install core packages first so a lerobot failure doesn't block everything.
+uv pip install \
+    "numpy==1.26.4" \
+    "scipy==1.15.3" \
+    "opencv-python" \
+    "pyzmq" \
+    "msgpack" \
+    "msgpack-numpy" \
+    "tyro" \
+    "pyttsx3==2.90" \
+    "av>=14.2" \
+    "datasets==3.6.0" \
+    "huggingface-hub"
+
+# Install pinocchio (pin) — may not be available on all platforms, non-fatal.
+uv pip install pin || echo "[WARN] pinocchio (pin) not available on this platform — FK features disabled"
+
+echo "[INFO] Installing lerobot (git, may take a few minutes) …"
 # LeRobot's git repo contains LFS test artifacts that aren't needed at runtime.
-# Skip them to avoid download failures and save bandwidth.
-GIT_LFS_SKIP_SMUDGE=1 uv pip install -e "gear_sonic[data_collection]"
+GIT_LFS_SKIP_SMUDGE=1 uv pip install \
+    "lerobot @ git+https://github.com/huggingface/lerobot.git@a445d9c9da6bea99a8972daa4fe1fdd053d711d2" \
+    || echo "[WARN] lerobot install failed — dataset saving will be unavailable"
+
+echo "[INFO] Installing gear_sonic (editable) …"
+uv pip install -e "gear_sonic" --no-deps
 
 echo ""
 echo "══════════════════════════════════════════════════════════════"

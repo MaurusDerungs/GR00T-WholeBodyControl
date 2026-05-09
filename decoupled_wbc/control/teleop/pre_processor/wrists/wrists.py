@@ -4,7 +4,15 @@ import numpy as np
 
 from decoupled_wbc.control.teleop.pre_processor.pre_processor import PreProcessor
 
-RIGHT_HAND_ROTATION = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+# 180° rotation around X: the right arm EE frame is the mirror of the left about the
+# sagittal plane.  Left EE: -X=up, +Y=left, +Z=fwd.  Right EE: +X=up, -Y=right, +Z=fwd.
+# hand_rotation_correction = Ry(-90).  For the left arm the effective mapping is
+#   R_ew_left @ Ry(-90)^T = I  (verified working).
+# For the right arm we need C_right = RIGHT_HAND_ROTATION @ Ry(-90) such that
+#   R_ew_right @ C_right^T = I  =>  RIGHT_HAND_ROTATION = R_ew_right @ Ry(90) = Rx(180).
+# Ry(180) (the previous value) only fixed up/down but left forward/backward and sideways
+# inverted because it produced an effective mapping of diag(-1,-1,+1).
+RIGHT_HAND_ROTATION = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
 
 
 class WristsPreProcessor(PreProcessor):

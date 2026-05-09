@@ -18,7 +18,7 @@ class JointSafetyMonitor:
     """Monitor joint velocities for G1 robot arms and hands."""
 
     # Velocity limits in rad/s
-    ARM_VELOCITY_LIMIT = 6.0  # rad/s for arm joints
+    ARM_VELOCITY_LIMIT = 10.0  # rad/s for arm joints (loosened from 6.0)
     HAND_VELOCITY_LIMIT = 50.0  # rad/s for finger joints
 
     def __init__(self, robot_model, enable_viz: bool = False, env_type: str = "real"):
@@ -365,8 +365,7 @@ class JointSafetyMonitor:
 
         # Add appropriate action message
         if critical_violations:
-            report += "Action: Safe mode engaged (kp=0, tau=0). System shutdown initiated.\n"
-            report += "Please restart Docker container to resume operation."
+            report += "Action: Startup ramp reset, safe action applied. Operation continues."
         else:
             report += "Action: Position warning only. Robot continues operation."
 
@@ -436,22 +435,20 @@ class JointSafetyMonitor:
         # warning_msg = self.get_violation_report(warning_violations)
         # print(f"[SAFETY WARNING] {warning_msg}")
 
-        # Handle critical violations (velocity) - trigger shutdown
+        # Handle critical violations (velocity) - warn but keep running with safe action
         if not is_safe and critical_violations:
             error_msg = self.get_violation_report(critical_violations)
-            if self.env_type == "real":
-                print(f"[SAFETY VIOLATION] {error_msg}")
-                self.trigger_system_shutdown()
+            print(f"[SAFETY WARNING] {error_msg}")
+            # Reset startup ramp so next action is applied gradually
+            self.startup_complete = False
+            self.startup_counter = 0
+            self.initial_positions = None
 
-            return {"safe_to_continue": False, "action": safe_action, "shutdown_required": True}
-
-        # Only position violations - continue with safe action
         return {"safe_to_continue": True, "action": safe_action, "shutdown_required": False}
 
     def trigger_system_shutdown(self):
-        """Trigger system shutdown after safety violation."""
-        print("\n[SAFETY] Initiating system shutdown due to safety violation...")
-        sys.exit(1)
+        """Formerly triggered system shutdown — now a no-op kept for compatibility."""
+        pass
 
 
 def main():

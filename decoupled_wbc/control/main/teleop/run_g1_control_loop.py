@@ -1,6 +1,7 @@
 from copy import deepcopy
 import time
 
+import numpy as np
 import tyro
 
 from decoupled_wbc.control.envs.g1.g1_env import G1Env
@@ -25,6 +26,7 @@ from decoupled_wbc.control.utils.keyboard_dispatcher import (
     KeyboardListenerPublisher,
     ROSKeyboardDispatcher,
 )
+from decoupled_wbc.control.utils.motion_token_encoder import MotionTokenEncoder
 from decoupled_wbc.control.utils.ros_utils import (
     ROSManager,
     ROSMsgPublisher,
@@ -32,6 +34,7 @@ from decoupled_wbc.control.utils.ros_utils import (
     ROSServiceServer,
 )
 from decoupled_wbc.control.utils.telemetry import Telemetry
+from decoupled_wbc.control.utils.zmq_sonic_publisher import ZMQSonicPublisher
 
 CONTROL_NODE_NAME = "ControlPolicy"
 
@@ -67,6 +70,24 @@ def main(config: ControlLoopConfig):
         env.start_simulator()
 
     wbc_policy = get_wbc_policy("g1", robot_model, wbc_config, config.upper_body_joint_speed)
+
+    # ── SONIC data-collection ZMQ publishers ────────────────────────────
+    sonic_zmq_pub: ZMQSonicPublisher | None = None
+    motion_encoder: MotionTokenEncoder | None = None
+    if config.enable_sonic_data_collection:
+        sonic_zmq_pub = ZMQSonicPublisher(
+            state_port=config.sonic_zmq_state_port,
+            pose_port=config.sonic_zmq_pose_port,
+        )
+        motion_encoder = MotionTokenEncoder(
+            checkpoint_path=config.sonic_encoder_checkpoint,
+            config_dir=config.sonic_encoder_config_dir,
+            control_frequency=config.control_frequency,
+        )
+        print(
+            "[SONIC] Data-collection ZMQ publishers active.  "
+            "Run run_data_exporter.py in a separate terminal to record."
+        )
 
     keyboard_listener_pub = KeyboardListenerPublisher()
     keyboard_estop = KeyboardEStop()
@@ -129,6 +150,34 @@ def main(config: ControlLoopConfig):
                 # Measure action queue time
                 with telemetry.timer("queue_action"):
                     env.queue_action(wbc_action)
+
+                # ── SONIC ZMQ publish (data collection) ─────────────────────
+                if sonic_zmq_pub is not None:
+                    with telemetry.timer("sonic_zmq_publish"):
+                        # Encode joint state → 64-D motion token
+                        token_state = motion_encoder.encode(obs["q"], robot_model)
+
+                        # Extract hand joint positions (actuator order, 7-D each)
+                        left_hand_q = robot_model.get_hand_actuated_joints(
+                            wbc_action["q"], side="left"
+                        )
+                        right_hand_q = robot_model.get_hand_actuated_joints(
+                            wbc_action["q"], side="right"
+                        )
+
+                        # Rising-edge toggle flags from the teleop command
+                        toggle_dc    = bool(wbc_goal.get("toggle_data_collection", False))
+                        toggle_abort = bool(wbc_goal.get("toggle_data_abort", False))
+
+                        sonic_zmq_pub.publish(
+                            obs=obs,
+                            wbc_action=wbc_action,
+                            token_state=token_state,
+                            left_hand_q=left_hand_q,
+                            right_hand_q=right_hand_q,
+                            toggle_data_collection=toggle_dc,
+                            toggle_data_abort=toggle_abort,
+                        )
 
                 # Publish status information for InteractiveModeController
                 with telemetry.timer("publish_status"):
@@ -229,6 +278,8 @@ def main(config: ControlLoopConfig):
         dispatcher.stop()
         ros_manager.shutdown()
         env.close()
+        if sonic_zmq_pub is not None:
+            sonic_zmq_pub.close()
 
 
 if __name__ == "__main__":

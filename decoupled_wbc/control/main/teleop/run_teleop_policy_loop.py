@@ -50,7 +50,10 @@ def main(config: TeleopConfig):
             body_control_device=config.body_control_device,
             hand_control_device=config.hand_control_device,
             body_streamer_ip=config.body_streamer_ip,  # vive tracker, leap motion does not require
+            body_streamer_port=config.body_streamer_port,
             body_streamer_keyword=config.body_streamer_keyword,
+            quest_bridge_host=config.quest_bridge_host,
+            quest_bridge_port=config.quest_bridge_port,
             enable_real_device=config.enable_real_device,
             replay_data_path=config.teleop_replay_path,
         )
