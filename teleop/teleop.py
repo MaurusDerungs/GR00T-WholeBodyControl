@@ -12,6 +12,15 @@ URDF_PATH = os.path.join(_HERE, 'unitree.urdf')
 WORKSPACE_RADIUS = 0.35
 DAMPING = 0.05
 
+# Quest (OpenXR): +X right, +Y up, +Z backward
+# Robot body:     +X forward, +Y left, +Z up
+# Assumes operator stands BEHIND the robot (same facing direction).
+QUEST_TO_ROBOT = np.array([
+    [ 0,  0, -1],   # robot +X (fwd)  = -Quest Z
+    [-1,  0,  0],   # robot +Y (left) = -Quest X
+    [ 0,  1,  0],   # robot +Z (up)   =  Quest Y
+])
+
 RIGHT_ARM_JOINTS = [
     "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
     "right_shoulder_yaw_joint",   "right_elbow_joint",
@@ -88,7 +97,7 @@ class TeleopInterface:
             if T_r is not None:
                 if right_home is None:
                     right_home = T_r[:3, 3].copy()
-                delta = T_r[:3, 3] - right_home
+                delta = QUEST_TO_ROBOT @ (T_r[:3, 3] - right_home)
                 if np.linalg.norm(delta) > WORKSPACE_RADIUS:
                     delta *= WORKSPACE_RADIUS / np.linalg.norm(delta)
                 angles = self._solve_ik(RIGHT_HOME + delta, self._right_ef,
@@ -100,7 +109,7 @@ class TeleopInterface:
             if T_l is not None:
                 if left_home is None:
                     left_home = T_l[:3, 3].copy()
-                delta = T_l[:3, 3] - left_home
+                delta = QUEST_TO_ROBOT @ (T_l[:3, 3] - left_home)
                 if np.linalg.norm(delta) > WORKSPACE_RADIUS:
                     delta *= WORKSPACE_RADIUS / np.linalg.norm(delta)
                 angles = self._solve_ik(LEFT_HOME + delta, self._left_ef,
