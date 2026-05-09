@@ -20,6 +20,7 @@
 #include <array>
 #include <chrono>
 #include <optional>
+#include <string>
 
 #include "../localmotion_kplanner.hpp"  // For LocomotionMode enum
 
@@ -31,7 +32,8 @@
  *
  * Packed binary layout sent by the remote controller:
  *   { start: bool, stop: bool, planner: bool,
- *     idle_reset?: bool, motion_restart?: bool, delta_heading?: f32/f64 }
+ *     idle_reset?: bool, motion_restart?: bool, motion_name?: u8[],
+ *     delta_heading?: f32/f64 }
  *
  * Multiple messages between two update() calls are accumulated using OR logic
  * for start/stop (so a transient pulse is never lost), while the planner flag
@@ -47,6 +49,8 @@ struct CommandMessage {
   /// Optional absolute heading override (radians).  When set, the value is
   /// written directly into HeadingState.delta_heading.
   std::optional<double> delta_heading;
+  /// Optional pre-loaded reference motion folder name to select and play.
+  std::optional<std::string> motion_name;
   bool valid = false;     ///< Set to true once a message has been decoded successfully.
 };
 

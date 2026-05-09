@@ -9,7 +9,8 @@
  *   -----------|--------
  *   command    | High-level control (start / stop / mode switch / reset).
  *              | Wire format: `{ start: bool, stop: bool, planner: bool,
- *              | idle_reset?: bool, motion_restart?: bool, delta_heading?: f32 }`
+ *              | idle_reset?: bool, motion_restart?: bool, motion_name?: u8[],
+ *              | delta_heading?: f32 }`
  *   planner    | Per-frame locomotion commands (mode, movement, facing, speed, height,
  *              | optional upper-body / hand / VR data).  Active in PLANNER mode.
  *   pose       | Streamed motion frames (joint_pos, joint_vel, body_quat, …).
@@ -252,11 +253,17 @@ class ZMQManager : public InputInterface {
           if (latest_command_.motion_restart) {
             motion_restart_requested_ = true;
           }
+          if (latest_command_.motion_name.has_value()) {
+            pending_motion_name_ = latest_command_.motion_name;
+          }
 
           // Handle mode switching.  Reset-to-idle always returns to planner/reference mode,
-          // while restart keeps the currently active mode and only rewinds the frame.
+          // named motions use loaded references, while restart keeps the currently active
+          // mode and only rewinds the frame.
           ManagedMode new_mode = active_mode_;
           if (latest_command_.idle_reset) {
+            new_mode = ManagedMode::PLANNER;
+          } else if (latest_command_.motion_name.has_value()) {
             new_mode = ManagedMode::PLANNER;
           } else if (!latest_command_.motion_restart) {
             new_mode = latest_command_.planner ? ManagedMode::PLANNER : ManagedMode::STREAMED_MOTION;
@@ -432,6 +439,49 @@ class ZMQManager : public InputInterface {
         return;
       }
 
+      if (pending_motion_name_.has_value()) {
+        const std::string motion_name = *pending_motion_name_;
+        pending_motion_name_.reset();
+
+        std::shared_ptr<const MotionSequence> selected_motion = motion_reader.GetMotion(motion_name);
+        if (!selected_motion) {
+          std::cerr << "[ZMQManager] Requested motion not found: " << motion_name << std::endl;
+          return;
+        }
+
+        for (size_t i = 0; i < motion_reader.motions.size(); ++i) {
+          if (motion_reader.motions[i]->name == motion_name) {
+            motion_reader.current_motion_index_ = static_cast<int>(i);
+            break;
+          }
+        }
+
+        movement_state_buffer.SetData(MovementState(
+          static_cast<int>(LocomotionMode::IDLE),
+          {0.0f, 0.0f, 0.0f},
+          {1.0f, 0.0f, 0.0f},
+          -1.0f,
+          -1.0f
+        ));
+        planner_state.enabled = false;
+        planner_state.initialized = false;
+        is_planner_ready_ = false;
+        switch_from_teleop_to_planner_ = false;
+        {
+          std::lock_guard<std::mutex> lock(current_motion_mutex);
+          operator_state.start = true;
+          operator_state.play = true;
+          current_motion = selected_motion;
+          current_frame = 0;
+          reinitialize_heading = true;
+          if (current_motion->GetEncodeMode() >= 0) {
+            current_motion->SetEncodeMode(0);
+          }
+        }
+        std::cout << "[ZMQManager] Playing reference motion: " << motion_name << std::endl;
+        return;
+      }
+
       // Delegate based on current mode
       if (active_mode_ == ManagedMode::PLANNER) {
         // Planner mode: handle planner input ourselves
@@ -595,8 +645,10 @@ class ZMQManager : public InputInterface {
         return;
       }
 
-      // Handle start control
-      if (start_control_ && !operator_state.start) {
+      // Handle start control. If a named reference motion disabled the planner
+      // while the controller stayed started, a fresh planner command should
+      // still be able to re-enable planner mode.
+      if (start_control_ && (!operator_state.start || !planner_state.enabled || !planner_state.initialized)) {
         operator_state.start = true;
         {
           std::lock_guard<std::mutex> lock(current_motion_mutex);
@@ -747,13 +799,14 @@ class ZMQManager : public InputInterface {
       if (hdr.fields.empty() || bufs.empty()) return;
       
       int start_idx = -1, stop_idx = -1, planner_idx = -1;
-      int idle_reset_idx = -1, motion_restart_idx = -1;
+      int idle_reset_idx = -1, motion_restart_idx = -1, motion_name_idx = -1;
       for (size_t i = 0; i < hdr.fields.size(); ++i) {
         if (hdr.fields[i].name == "start") start_idx = static_cast<int>(i);
         else if (hdr.fields[i].name == "stop") stop_idx = static_cast<int>(i);
         else if (hdr.fields[i].name == "planner") planner_idx = static_cast<int>(i);
         else if (hdr.fields[i].name == "idle_reset") idle_reset_idx = static_cast<int>(i);
         else if (hdr.fields[i].name == "motion_restart") motion_restart_idx = static_cast<int>(i);
+        else if (hdr.fields[i].name == "motion_name") motion_name_idx = static_cast<int>(i);
       }
       
       if (start_idx < 0 || stop_idx < 0 || planner_idx < 0) {
@@ -792,6 +845,23 @@ class ZMQManager : public InputInterface {
       cmd.planner = decode_bool(planner_idx);
       cmd.idle_reset = decode_bool(idle_reset_idx);
       cmd.motion_restart = decode_bool(motion_restart_idx);
+
+      if (motion_name_idx >= 0) {
+        const auto& name_buf = bufs[motion_name_idx];
+        const auto& name_field = hdr.fields[motion_name_idx];
+        if (name_field.dtype == "u8" || name_field.dtype == "i8") {
+          const char* begin = static_cast<const char*>(name_buf.data);
+          size_t len = 0;
+          while (len < name_buf.size && begin[len] != '\0') {
+            ++len;
+          }
+          if (len > 0) {
+            cmd.motion_name = std::string(begin, len);
+          }
+        } else {
+          std::cerr << "[ZMQManager] motion_name must use dtype u8" << std::endl;
+        }
+      }
       
       // Update buffer with OR logic to accumulate start/stop signals
       std::lock_guard<std::mutex> lock(command_mutex_);
@@ -810,6 +880,7 @@ class ZMQManager : public InputInterface {
       latest_command_.idle_reset = latest_command_.idle_reset || cmd.idle_reset;
       latest_command_.motion_restart = latest_command_.motion_restart || cmd.motion_restart;
       latest_command_.planner = cmd.planner;  // Overwrite (mode should be latest)
+      latest_command_.motion_name = cmd.motion_name;
       latest_command_.valid = true;
       
       if constexpr (DEBUG_LOGGING) {
@@ -1283,6 +1354,7 @@ class ZMQManager : public InputInterface {
     
     std::mutex command_mutex_;          ///< Guards access to latest_command_.
     CommandMessage latest_command_;     ///< Most recent (or accumulated) command message.
+    std::optional<std::string> pending_motion_name_; ///< Reference motion requested by command topic.
     
     std::mutex planner_mutex_;          ///< Guards access to latest_planner_message_.
     PlannerMessage latest_planner_message_;  ///< Most recent planner movement message.

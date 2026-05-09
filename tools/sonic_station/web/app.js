@@ -32,6 +32,8 @@ const el = {
   emergencyStopButton: document.querySelector("#emergencyStopButton"),
   idleResetButton: document.querySelector("#idleResetButton"),
   motionRestartButton: document.querySelector("#motionRestartButton"),
+  teleopHelpButton: document.querySelector("#teleopHelpButton"),
+  teleopDialog: document.querySelector("#teleopDialog"),
   statusLog: document.querySelector("#statusLog"),
   generatedList: document.querySelector("#generatedList"),
   curatedList: document.querySelector("#curatedList"),
@@ -376,6 +378,7 @@ el.refreshButton.addEventListener("click", () => refresh());
 el.emergencyStopButton.addEventListener("click", () => sendReset("emergency_stop", "Emergency stop"));
 el.idleResetButton.addEventListener("click", () => sendReset("idle_reset", "IDLE reset"));
 el.motionRestartButton.addEventListener("click", () => sendReset("motion_restart", "Motion restart"));
+el.teleopHelpButton.addEventListener("click", () => el.teleopDialog.showModal());
 el.cameraResetButton.addEventListener("click", resetCameraView);
 el.simImage.parentElement.addEventListener("pointerdown", onCameraPointerDown);
 el.simImage.parentElement.addEventListener("pointermove", onCameraPointerMove);

@@ -25,6 +25,7 @@
         <button id="emergencyStopButton" class="danger emergency" type="button">Emergency Stop</button>
         <button id="idleResetButton" type="button">Reset to IDLE</button>
         <button id="motionRestartButton" type="button">Restart Motion</button>
+        <button id="teleopHelpButton" class="primary" type="button">Teleop</button>
       </section>
 
       <section class="control-grid">
@@ -112,6 +113,31 @@
         </section>
       </section>
     </main>
+
+    <dialog id="teleopDialog" class="teleop-dialog">
+      <form method="dialog">
+        <div class="panel-head">
+          <h2>Hybrid Teleop</h2>
+          <button type="submit">Close</button>
+        </div>
+        <div class="teleop-body">
+          <p class="muted">Run this in a terminal while Sonic Station/deploy is active:</p>
+          <pre>python gear_sonic_deploy/scripts/run_wasd_planner.py --no-launch</pre>
+          <div class="teleop-grid">
+            <span>W / S</span><strong>forward / backward</strong>
+            <span>A / D</span><strong>turn while moving</strong>
+            <span>Q / E</span><strong>rotate facing direction</strong>
+            <span>9 / 0</span><strong>decrease / increase walking speed</strong>
+            <span>, / .</span><strong>strafe left / right</strong>
+            <span>Space</span><strong>stop walking</strong>
+            <span>1-6 + Enter</span><strong>trigger preset actions</strong>
+            <span>]</span><strong>request control start</strong>
+            <span>O</span><strong>stop deploy</strong>
+            <span>Esc</span><strong>quit teleop script</strong>
+          </div>
+        </div>
+      </form>
+    </dialog>
 
     <script src="/static/app.js"></script>
   </body>

@@ -148,6 +148,50 @@ h2 {
   font-weight: 800;
 }
 
+.teleop-dialog {
+  width: min(620px, calc(100vw - 28px));
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.teleop-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.teleop-dialog form {
+  margin: 0;
+}
+
+.teleop-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.teleop-body pre {
+  height: auto;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #111619;
+}
+
+.teleop-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px 12px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.teleop-grid span {
+  color: var(--accent);
+  font-weight: 760;
+}
+
 .control-grid,
 .activity-grid {
   display: grid;
