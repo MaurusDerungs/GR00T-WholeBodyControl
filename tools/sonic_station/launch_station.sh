@@ -202,11 +202,10 @@ cd "$DEPLOY_DIR"
 DEPLOY_ARGS=(
   --motion-data "$STATION_MOTION_DATA"
   --input-type zmq_manager
-  --yes
 )
 
 if [[ "$STATION_MODE" == "sim" ]]; then
-  DEPLOY_ARGS+=(--auto-control-start sim)
+  DEPLOY_ARGS+=(--auto-control-start --yes sim)
 else
   DEPLOY_ARGS+=("$STATION_ROBOT_INTERFACE")
 fi

@@ -33,6 +33,7 @@
  *
  *   Key  | Action
  *   -----|-------
+ *   ]    | Start control system
  *   O/o  | Emergency stop
  *   g/G, h/H | Left-hand compliance ±0.1
  *   b/B, v/V | Right-hand compliance ±0.1
@@ -178,6 +179,11 @@ class ZMQManager : public InputInterface {
           case 'F':
             report_temperature_flag_ = true;
             is_manager_key = true;
+            break;
+          case ']':
+            start_control_ = true;
+            is_manager_key = true;
+            std::cout << "[ZMQManager] Start control requested (])" << std::endl;
             break;
           // Global compliance controls - work across ALL modes
           case 'g':
