@@ -89,6 +89,7 @@ def override_wbc_config(
         "waist_pitch_limit": config.waist_pitch_limit,
         "hand_torque_limit": config.hand_torque_limit,
         "enable_natural_walk": config.enable_natural_walk,
+        "AUTO_DISABLE_ELASTIC_AFTER_CMD_SEC": config.auto_disable_elastic_after_cmd_sec,
     }
 
     if missed_keys_only:
@@ -204,6 +205,9 @@ class BaseConfig(ArgsConfigTemplate):
 
     enable_natural_walk: bool = False
     """Enable natural walk mode."""
+
+    auto_disable_elastic_after_cmd_sec: Optional[float] = None
+    """Press the MuJoCo elastic-band toggle this many seconds after low commands arrive."""
 
     # Teleop/Device Configuration
     body_control_device: str = "dummy"

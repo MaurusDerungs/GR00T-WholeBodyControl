@@ -38,6 +38,7 @@
 #include <iomanip>
 #include <filesystem>
 #include <regex>
+#include <algorithm>
 
 #include "../include/fk.hpp"
 #include "../include/policy_parameters.hpp"
@@ -694,6 +695,7 @@ class MotionDataReader {
         return false;
       }
 
+      std::sort(motion_names.begin(), motion_names.end());
       std::cout << "Found " << motion_names.size() << " motion folders" << std::endl;
 
       for (const auto& motion_name : motion_names) {

@@ -208,6 +208,12 @@ show_usage() {
     echo "  --obs-config PATH       Set the observation config file (default: policy/configs/example.yaml)"
     echo "  --planner PATH          Set the planner model path (default: planner/example.onnx)"
     echo "  --motion-data PATH      Set the motion data path (default: reference/example_motion/)"
+    echo "  --auto-motion-loop      Automatically cycle through reference motions forever"
+    echo "  --auto-motion-start-delay SEC"
+    echo "                          Wait before auto-loop playback starts"
+    echo "  --auto-motion-playback-start-index INDEX"
+    echo "                          Motion index to switch to when playback starts"
+    echo "  -y, --yes               Skip deployment confirmation prompt"
     echo "  --input-type TYPE       Set the input type (default: zmq_manager)"
     echo "  --output-type TYPE      Set the output type (default: ros2)"
     echo "  --zmq-host HOST         Set the ZMQ host (default: localhost)"
@@ -242,6 +248,10 @@ MOTION_DATA_DEFAULT="reference/example/"
 INPUT_TYPE_DEFAULT="manager"
 OUTPUT_TYPE_DEFAULT="all"
 ZMQ_HOST_DEFAULT="localhost"
+AUTO_MOTION_LOOP_DEFAULT="false"
+AUTO_MOTION_START_DELAY_DEFAULT="0"
+AUTO_MOTION_PLAYBACK_START_INDEX_DEFAULT="0"
+ASSUME_YES_DEFAULT="false"
 
 # Initialize with defaults (will be set after parsing)
 CHECKPOINT="$CHECKPOINT_DEFAULT"
@@ -251,6 +261,10 @@ MOTION_DATA="$MOTION_DATA_DEFAULT"
 INPUT_TYPE="$INPUT_TYPE_DEFAULT"
 OUTPUT_TYPE="$OUTPUT_TYPE_DEFAULT"
 ZMQ_HOST="$ZMQ_HOST_DEFAULT"
+AUTO_MOTION_LOOP="$AUTO_MOTION_LOOP_DEFAULT"
+AUTO_MOTION_START_DELAY="$AUTO_MOTION_START_DELAY_DEFAULT"
+AUTO_MOTION_PLAYBACK_START_INDEX="$AUTO_MOTION_PLAYBACK_START_INDEX_DEFAULT"
+ASSUME_YES="$ASSUME_YES_DEFAULT"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -290,6 +304,30 @@ while [[ $# -gt 0 ]]; do
             fi
             MOTION_DATA="$2"
             shift 2
+            ;;
+        --auto-motion-loop)
+            AUTO_MOTION_LOOP="true"
+            shift
+            ;;
+        --auto-motion-start-delay)
+            if [[ -z "$2" ]]; then
+                echo -e "${RED}Error: --auto-motion-start-delay requires a seconds argument${NC}" >&2
+                exit 1
+            fi
+            AUTO_MOTION_START_DELAY="$2"
+            shift 2
+            ;;
+        --auto-motion-playback-start-index)
+            if [[ -z "$2" ]]; then
+                echo -e "${RED}Error: --auto-motion-playback-start-index requires an index argument${NC}" >&2
+                exit 1
+            fi
+            AUTO_MOTION_PLAYBACK_START_INDEX="$2"
+            shift 2
+            ;;
+        -y|--yes)
+            ASSUME_YES="true"
+            shift
             ;;
         --input-type)
             if [[ -z "$2" ]]; then
@@ -385,6 +423,18 @@ if [[ "$ENV_TYPE" == "sim" ]]; then
     EXTRA_ARGS="--disable-crc-check"
     echo -e "${YELLOW}📋 Simulation mode: CRC check will be disabled${NC}"
     echo ""
+fi
+
+if [[ "$AUTO_MOTION_LOOP" == "true" ]]; then
+    EXTRA_ARGS="$EXTRA_ARGS --auto-motion-loop"
+fi
+
+if [[ "$AUTO_MOTION_START_DELAY" != "0" ]]; then
+    EXTRA_ARGS="$EXTRA_ARGS --auto-motion-start-delay $AUTO_MOTION_START_DELAY"
+fi
+
+if [[ "$AUTO_MOTION_PLAYBACK_START_INDEX" != "0" ]]; then
+    EXTRA_ARGS="$EXTRA_ARGS --auto-motion-playback-start-index $AUTO_MOTION_PLAYBACK_START_INDEX"
 fi
 
 # ============================================================================
@@ -510,6 +560,9 @@ echo -e "  Network Interface:  ${GREEN}$TARGET${NC}"
 echo -e "  Decoder Model:      ${GREEN}$CHECKPOINT_DECODER${NC}"
 echo -e "  Encoder Model:      ${GREEN}$CHECKPOINT_ENCODER${NC}"
 echo -e "  Motion Data:        ${GREEN}$MOTION_DATA${NC}"
+echo -e "  Auto Motion Loop:   ${GREEN}$AUTO_MOTION_LOOP${NC}"
+echo -e "  Auto Start Delay:   ${GREEN}${AUTO_MOTION_START_DELAY}s${NC}"
+echo -e "  Playback Index:     ${GREEN}${AUTO_MOTION_PLAYBACK_START_INDEX}${NC}"
 echo -e "  Obs Config:         ${GREEN}$OBS_CONFIG${NC}"
 echo -e "  Planner:            ${GREEN}$PLANNER${NC}"
 echo -e "  Input Type:         ${GREEN}$INPUT_TYPE${NC}"
@@ -544,7 +597,12 @@ else
     echo -e "${YELLOW}📋 This will start the simulation control system.${NC}"
 fi
 echo ""
-read -p "$(echo -e ${GREEN}Proceed with deployment? [Y/n]: ${NC})" confirm
+if [[ "$ASSUME_YES" == "true" ]]; then
+    confirm="Y"
+    echo -e "${GREEN}Proceed with deployment? [Y/n]: Y${NC}"
+else
+    read -p "$(echo -e ${GREEN}Proceed with deployment? [Y/n]: ${NC})" confirm
+fi
 
 if [[ "$confirm" =~ ^[Yy]$ ]] || [[ -z "$confirm" ]]; then
     echo ""

@@ -157,6 +157,7 @@ class DefaultEnv:
         self.joint_class_map = self._get_dof_indices_by_class()
 
         self.perform_sysid_search = self.config.get("perform_sysid_search", False)
+        self.elastic_band = None
 
         # Check for static root link (fixed base)
         self.use_floating_root_link = "floating_base_joint" in [
@@ -547,6 +548,11 @@ class BaseSimulator:
         self.image_dt = self.config.get("IMAGE_DT", 0.033333)
         self.viewer_dt = self.config.get("VIEWER_DT", 0.02)
         self._running = True
+        self.auto_disable_elastic_after_cmd_sec = self.config.get(
+            "AUTO_DISABLE_ELASTIC_AFTER_CMD_SEC", None
+        )
+        self._auto_disable_elastic_cmd_start = None
+        self._auto_disable_elastic_done = False
 
         self.robot = Robot(self.config)
 
@@ -607,6 +613,7 @@ class BaseSimulator:
             ):
                 step_start = time.monotonic()
 
+                self.maybe_auto_disable_elastic(step_start)
                 self.sim_env.sim_step()
                 now = time.time()
                 if now - ts > 1 / 10.0 and self.redis_client is not None:
@@ -635,6 +642,27 @@ class BaseSimulator:
             print("Simulator interrupted by user.")
         finally:
             self.close()
+
+    def maybe_auto_disable_elastic(self, now):
+        if self._auto_disable_elastic_done or self.auto_disable_elastic_after_cmd_sec is None:
+            return
+        if not self.sim_env.elastic_band or not self.sim_env.elastic_band.enable:
+            self._auto_disable_elastic_done = True
+            return
+        if not self.unitree_bridge.low_cmd_received:
+            return
+        if self._auto_disable_elastic_cmd_start is None:
+            self._auto_disable_elastic_cmd_start = now
+            print(
+                "Auto MuJoCo '9' armed: low commands received; "
+                f"waiting {self.auto_disable_elastic_after_cmd_sec:.1f}s "
+                "for controller init/']' before disabling elastic band"
+            )
+            return
+        if now - self._auto_disable_elastic_cmd_start >= self.auto_disable_elastic_after_cmd_sec:
+            self.sim_env.elastic_band.enable = False
+            self._auto_disable_elastic_done = True
+            print("Auto MuJoCo '9': elastic band disabled.")
 
     def __del__(self):
         self.close()

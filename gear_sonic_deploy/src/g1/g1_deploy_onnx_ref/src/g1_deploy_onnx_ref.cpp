@@ -312,6 +312,18 @@ class G1Deploy {
     MotionRecorder zmq_motion_recorder_;
     MotionRecorder planner_motion_recorder_;
     bool enable_motion_recording_ = false;
+    bool auto_motion_loop_ = false;
+    double auto_motion_start_delay_sec_ = 0.0;
+    int auto_motion_playback_start_index_ = 0;
+    double auto_motion_stable_duration_sec_ = 1.5;
+    double auto_motion_max_base_angular_velocity_ = 0.35;
+    double auto_motion_max_avg_joint_velocity_ = 0.6;
+    bool auto_motion_control_timer_started_ = false;
+    bool auto_motion_stable_timer_started_ = false;
+    std::chrono::steady_clock::time_point auto_motion_control_start_time_;
+    std::chrono::steady_clock::time_point auto_motion_stable_start_time_;
+    bool auto_motion_start_announced_ = false;
+    bool auto_motion_playback_started_ = false;
     
     // =========================================================================
     // Initial compliance values for VR 3-point control (set from command line)
@@ -2156,7 +2168,10 @@ class G1Deploy {
       std::string zmq_out_topic = "g1_debug",
       bool enable_motion_recording = false,
       std::array<double, 3> initial_compliance = {0.05, 0.05, 0.0},
-      double initial_max_close_ratio = 1.0)
+      double initial_max_close_ratio = 1.0,
+      bool auto_motion_loop = false,
+      double auto_motion_start_delay_sec = 0.0,
+      int auto_motion_playback_start_index = 0)
       : time_(0.0),
         publish_dt_(0.002),
         control_dt_(0.02),
@@ -2172,6 +2187,9 @@ class G1Deploy {
         last_left_hand_action {0.0},
         last_right_hand_action {0.0},
         enable_motion_recording_(enable_motion_recording),
+        auto_motion_loop_(auto_motion_loop),
+        auto_motion_start_delay_sec_(std::max(0.0, auto_motion_start_delay_sec)),
+        auto_motion_playback_start_index_(std::max(0, auto_motion_playback_start_index)),
         initial_vr_3point_compliance_(initial_compliance),
         initial_max_close_ratio_(initial_max_close_ratio),
         //env(ORT_LOGGING_LEVEL_WARNING, "G1Deploy"),
@@ -2272,8 +2290,13 @@ class G1Deploy {
             current_frame_ = 0;
             motion_name = current_motion_->name;
           }
-          operator_state.play = false;
-          std::cout << "Started with motion: " << motion_name << " (paused at frame 0)" << std::endl;
+          operator_state.play = auto_motion_loop_ && auto_motion_start_delay_sec_ <= 0.0;
+          std::cout << "Started with motion: " << motion_name
+                    << (auto_motion_loop_ ? " (auto-loop armed)" : " (paused at frame 0)") << std::endl;
+          if (auto_motion_loop_ && auto_motion_start_delay_sec_ > 0.0) {
+            std::cout << "Auto-loop will hold frame 0 for " << auto_motion_start_delay_sec_
+                      << "s before starting playback." << std::endl;
+          }
         } else {
           std::cout << "✗ Error: Motion directory found but no valid motions loaded from " << motion_data_path
                     << std::endl;
@@ -3375,7 +3398,6 @@ class G1Deploy {
         // Check if motion completed (reached the end)
         if (current_motion_->name != "streamed") {
           if (current_frame_ >= current_motion_->timesteps) {
-            operator_state.play = false;
             if (current_motion_ ->name != "temporary_motion") {
               std::cout << "______________________________________________________" << std::endl;
               std::cout << "Motion index: " << motion_reader_.current_motion_index_ << " : " << current_motion_->name << " completed." << std::endl;
@@ -3383,10 +3405,27 @@ class G1Deploy {
             } else {
               std::cout << "Temporary motion completed." << std::endl;
             }
-            current_frame_ = 0; // Reset to beginning
-            // Total reset: both base quaternion and delta heading
-            reinitialize_heading_ = true;
-            std::cout << "Reset to frame 0." << std::endl;
+            if (auto_motion_loop_ && current_motion_->name != "temporary_motion" && !motion_reader_.motions.empty()) {
+              int next_motion_index =
+                  (motion_reader_.current_motion_index_ + 1) % motion_reader_.motions.size();
+              if (auto_motion_playback_started_ && auto_motion_playback_start_index_ > 0
+                  && next_motion_index < auto_motion_playback_start_index_) {
+                next_motion_index = auto_motion_playback_start_index_;
+              }
+              motion_reader_.current_motion_index_ = next_motion_index;
+              current_motion_ = motion_reader_.GetMotionShared(motion_reader_.current_motion_index_);
+              current_frame_ = 0;
+              operator_state.play = true;
+              reinitialize_heading_ = true;
+              std::cout << "Auto-loop switched to motion " << motion_reader_.current_motion_index_
+                        << ": " << current_motion_->name << std::endl;
+            } else {
+              operator_state.play = false;
+              current_frame_ = 0; // Reset to beginning
+              // Total reset: both base quaternion and delta heading
+              reinitialize_heading_ = true;
+              std::cout << "Reset to frame 0." << std::endl;
+            }
           }
         } else {
           if (current_frame_ >= current_motion_->timesteps - saved_frame_for_observation_window_) {
@@ -3457,6 +3496,92 @@ class G1Deploy {
         PlannerState planner_state{false, false};
         input_interface_->handle_input(motion_reader_, current_motion_, current_frame_, operator_state,
                                       reinitialize_heading_, heading_state_buffer_, has_planner, planner_state, movement_state_buffer_, current_motion_mutex_, report_temperature_);
+      }
+
+      if (auto_motion_loop_ && !motion_reader_.motions.empty()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (program_state_ == ProgramState::CONTROL && !auto_motion_control_timer_started_) {
+          auto_motion_control_start_time_ = now;
+          auto_motion_control_timer_started_ = true;
+          auto_motion_stable_timer_started_ = false;
+          std::cout << "Auto-loop settle timer started after automatic CONTROL start." << std::endl;
+        }
+
+        bool robot_is_stable = false;
+        if (low_state_data) {
+          const auto gyro = low_state_data->imu_state().gyroscope();
+          const double base_angular_velocity =
+              std::sqrt(static_cast<double>(gyro[0]) * gyro[0]
+                        + static_cast<double>(gyro[1]) * gyro[1]
+                        + static_cast<double>(gyro[2]) * gyro[2]);
+          double avg_joint_velocity = 0.0;
+          for (int i = 0; i < G1_NUM_MOTOR; ++i) {
+            avg_joint_velocity += std::abs(static_cast<double>(low_state_data->motor_state()[i].dq()));
+          }
+          avg_joint_velocity /= static_cast<double>(G1_NUM_MOTOR);
+          robot_is_stable =
+              base_angular_velocity < auto_motion_max_base_angular_velocity_
+              && avg_joint_velocity < auto_motion_max_avg_joint_velocity_;
+        }
+
+        if (program_state_ == ProgramState::CONTROL) {
+          if (robot_is_stable) {
+            if (!auto_motion_stable_timer_started_) {
+              auto_motion_stable_start_time_ = now;
+              auto_motion_stable_timer_started_ = true;
+            }
+          } else {
+            auto_motion_stable_timer_started_ = false;
+          }
+        }
+
+        const double seconds_since_control = auto_motion_control_timer_started_
+            ? std::chrono::duration<double>(now - auto_motion_control_start_time_).count()
+            : 0.0;
+        const double stable_seconds = auto_motion_stable_timer_started_
+            ? std::chrono::duration<double>(now - auto_motion_stable_start_time_).count()
+            : 0.0;
+        const bool ready_to_start_playback =
+            program_state_ == ProgramState::CONTROL
+            && seconds_since_control >= auto_motion_start_delay_sec_
+            && stable_seconds >= auto_motion_stable_duration_sec_;
+
+        std::lock_guard<std::mutex> lock(current_motion_mutex_);
+        auto_motion_playback_start_index_ = std::min<int>(
+            auto_motion_playback_start_index_,
+            static_cast<int>(motion_reader_.motions.size()) - 1);
+        if (!current_motion_ || current_motion_->name == "temporary_motion") {
+          current_motion_ = motion_reader_.GetMotionShared(motion_reader_.current_motion_index_);
+          current_frame_ = 0;
+          reinitialize_heading_ = true;
+        }
+        if (program_state_ == ProgramState::WAIT_FOR_CONTROL) {
+          operator_state.start = true;
+          operator_state.play = false;
+        } else if (ready_to_start_playback || (program_state_ == ProgramState::CONTROL && auto_motion_playback_started_)) {
+          if (!auto_motion_playback_started_) {
+            if (motion_reader_.current_motion_index_ != auto_motion_playback_start_index_) {
+              motion_reader_.current_motion_index_ = auto_motion_playback_start_index_;
+              current_motion_ = motion_reader_.GetMotionShared(motion_reader_.current_motion_index_);
+            }
+            current_frame_ = 0;
+            reinitialize_heading_ = true;
+            auto_motion_playback_started_ = true;
+          }
+          operator_state.start = true;
+          operator_state.play = true;
+        } else if (program_state_ == ProgramState::CONTROL) {
+          operator_state.start = true;
+          operator_state.play = false;
+        } else {
+          operator_state.play = false;
+        }
+        if (program_state_ == ProgramState::CONTROL && operator_state.play && !auto_motion_start_announced_) {
+          auto_motion_start_announced_ = true;
+          std::cout << "Auto-loop playback started after " << seconds_since_control
+                    << "s in CONTROL and " << stable_seconds
+                    << "s of stable low motion." << std::endl;
+        }
       }
 
       if (playback_input_file_ && program_state_ == ProgramState::CONTROL) {
@@ -4128,6 +4253,9 @@ int main(int argc, char const* argv[]) {
     std::cout << "  --logs-dir <path>: optional logs output base directory (default: logs/<timestamp>/)" << std::endl;
     std::cout << "  --enable-csv-logs: enable writing CSV logs (default: OFF)" << std::endl;
     std::cout << "  --enable-motion-recording: enable motion recording for ZMQ/planner (default: OFF)" << std::endl;
+    std::cout << "  --auto-motion-loop: automatically play reference motions forever, cycling to the next motion at each end" << std::endl;
+    std::cout << "  --auto-motion-start-delay <seconds>: hold frame 0 before auto-loop playback starts (default: 0)" << std::endl;
+    std::cout << "  --auto-motion-playback-start-index <index>: motion index to switch to when delayed playback starts (default: 0)" << std::endl;
     std::cout << "  --set-compliance <value>: set initial VR 3-point compliance (0.01=rigid, 0.5=compliant; default: [0.5, 0.5, 0.0])" << std::endl;
     std::cout << "                                 Can specify 1 value (both hands) or 3 values (left_wrist,right_wrist,head)" << std::endl;
     std::cout << "                                 Keyboard controls: g/h = left hand +/- 0.1, b/v = right hand +/- 0.1" << std::endl;
@@ -4173,6 +4301,9 @@ int main(int argc, char const* argv[]) {
   bool zmq_conflate = false;  // default off; enable with --zmq-conflate
   bool zmq_verbose = false;
   bool enableMotionRecording = false;  // default off; enable with --enable-motion-recording
+  bool autoMotionLoop = false;
+  double autoMotionStartDelaySec = 0.0;
+  int autoMotionPlaybackStartIndex = 0;
   int zmq_out_port = 5557;
   std::string zmq_out_topic = "g1_debug";
   std::array<double, 3> initial_compliance = {0.5, 0.5, 0.0}; // initial compliance is 0.5 for both hands (keyboard controllable)
@@ -4354,6 +4485,37 @@ int main(int argc, char const* argv[]) {
     } else if (std::string(argv[i]) == "--enable-motion-recording") {
       enableMotionRecording = true;
       std::cout << "[INFO] Motion recording enabled" << std::endl;
+    } else if (std::string(argv[i]) == "--auto-motion-loop") {
+      autoMotionLoop = true;
+      std::cout << "[INFO] Auto motion loop enabled" << std::endl;
+    } else if (std::string(argv[i]) == "--auto-motion-start-delay") {
+      if (i + 1 < argc) {
+        try {
+          autoMotionStartDelaySec = std::max(0.0, std::stod(argv[i + 1]));
+        } catch (...) {
+          std::cerr << "Error: Invalid auto motion start delay: " << argv[i + 1] << std::endl;
+          exit(1);
+        }
+        std::cout << "[INFO] Auto motion start delay: " << autoMotionStartDelaySec << "s" << std::endl;
+        i++;
+      } else {
+        std::cerr << "Error: --auto-motion-start-delay requires a seconds argument" << std::endl;
+        exit(1);
+      }
+    } else if (std::string(argv[i]) == "--auto-motion-playback-start-index") {
+      if (i + 1 < argc) {
+        try {
+          autoMotionPlaybackStartIndex = std::max(0, std::stoi(argv[i + 1]));
+        } catch (...) {
+          std::cerr << "Error: Invalid auto motion playback start index: " << argv[i + 1] << std::endl;
+          exit(1);
+        }
+        std::cout << "[INFO] Auto motion playback start index: " << autoMotionPlaybackStartIndex << std::endl;
+        i++;
+      } else {
+        std::cerr << "Error: --auto-motion-playback-start-index requires an index argument" << std::endl;
+        exit(1);
+      }
     } else if (std::string(argv[i]) == "--set-compliance") {
       if (i + 1 < argc) {
         // Parse compliance values (can be 1 or 3 values)
@@ -4438,7 +4600,10 @@ int main(int argc, char const* argv[]) {
     zmq_out_topic,
     enableMotionRecording,
     initial_compliance,
-    initial_max_close_ratio
+    initial_max_close_ratio,
+    autoMotionLoop,
+    autoMotionStartDelaySec,
+    autoMotionPlaybackStartIndex
   );
   std::cout << "[DEBUG] G1Deploy object created successfully!" << std::endl;
   
@@ -4465,4 +4630,3 @@ int main(int argc, char const* argv[]) {
   std::cout << "[DEBUG] Program exiting normally..." << std::endl;
   return 0;
 }
-
