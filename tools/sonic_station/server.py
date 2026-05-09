@@ -42,6 +42,7 @@ _JOBS_LOCK = threading.Lock()
 _JOBS: dict[str, "GenerationJob"] = {}
 _PLAYBACK_LOCK = threading.Lock()
 _PLAYBACKS: dict[str, "PlaybackJob"] = {}
+_LATEST_PLAYBACK_ID = ""
 _CAMERA_VIEW_STORE: "CameraViewStore | None" = None
 _STATION_MODE = "sim"
 _ROBOT_INTERFACE = ""
@@ -223,6 +224,9 @@ class PlaybackJob:
     error: str | None = None
     log_path: str | None = None
     command: list[str] = field(default_factory=list)
+    source: str = ""
+    duration_sec: float | None = None
+    auto_idle_reset: bool = False
 
 
 def _slugify(value: str, fallback: str) -> str:
@@ -284,7 +288,7 @@ def _update_playback(playback_id: str, **updates: object) -> PlaybackJob:
         return job
 
 
-def _resolve_motion_request(data: dict) -> tuple[str, str, str]:
+def _resolve_motion_request(data: dict) -> tuple[str, str, str, str, float | None]:
     requested = str(data.get("motion_id") or data.get("motion") or data.get("name") or "").strip()
     if not requested:
         raise ValueError("motion_id is required")
@@ -297,15 +301,39 @@ def _resolve_motion_request(data: dict) -> tuple[str, str, str]:
                 motion_path = REPO_ROOT / motion_path
             if not motion.valid:
                 raise ValueError(f"motion is not valid: {motion.id}")
-            return motion.id, motion.name, str(motion_path)
+            return motion.id, motion.name, str(motion_path), motion.source, motion.duration_sec
 
     direct_path = Path(requested)
     if not direct_path.is_absolute():
         direct_path = REPO_ROOT / direct_path
     if direct_path.exists():
-        return f"path:{direct_path.name}", direct_path.name, str(direct_path)
+        return f"path:{direct_path.name}", direct_path.name, str(direct_path), "path", None
 
     raise ValueError(f"motion not found: {requested}")
+
+
+def _send_control_action(action: str, *, timeout: float = 3.0) -> subprocess.CompletedProcess[str]:
+    command = [
+        sys.executable,
+        str(STREAM_SCRIPT),
+        "--control-action",
+        action,
+        "--startup-delay",
+        "0.1",
+        "--repeat-command",
+        "8",
+        "--repeat-command-interval",
+        "0.04",
+    ]
+    return subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
 
 
 def _run_generation_job(job_id: str) -> None:
@@ -399,6 +427,41 @@ def _run_playback_job(playback_id: str) -> None:
         )
 
     if proc.returncode == 0:
+        if job.auto_idle_reset:
+            reset_delay = max(0.5, min(30.0, float(job.duration_sec or 6.0) + 0.5))
+            with log_path.open("a", encoding="utf-8") as log:
+                log.write(f"\nAuto IDLE reset armed in {reset_delay:.2f}s for generated motion.\n")
+            time.sleep(reset_delay)
+            with _PLAYBACK_LOCK:
+                is_latest_playback = playback_id == _LATEST_PLAYBACK_ID
+            if is_latest_playback:
+                try:
+                    reset_proc = _send_control_action("idle_reset")
+                    with log_path.open("a", encoding="utf-8") as log:
+                        log.write("\n$ auto idle_reset\n")
+                        log.write(reset_proc.stdout)
+                    if reset_proc.returncode != 0:
+                        _update_playback(
+                            playback_id,
+                            status="failed",
+                            finished_at=time.time(),
+                            returncode=reset_proc.returncode,
+                            error=f"auto idle reset failed with exit code {reset_proc.returncode}",
+                        )
+                        return
+                except subprocess.TimeoutExpired:
+                    _update_playback(
+                        playback_id,
+                        status="failed",
+                        finished_at=time.time(),
+                        returncode=124,
+                        error="auto idle reset timed out",
+                    )
+                    return
+            else:
+                with log_path.open("a", encoding="utf-8") as log:
+                    log.write("\nAuto IDLE reset skipped because a newer playback was queued.\n")
+
         _update_playback(
             playback_id,
             status="succeeded",
@@ -643,28 +706,8 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            command = [
-                sys.executable,
-                str(STREAM_SCRIPT),
-                "--control-action",
-                action,
-                "--startup-delay",
-                "0.1",
-                "--repeat-command",
-                "8",
-                "--repeat-command-interval",
-                "0.04",
-            ]
             try:
-                proc = subprocess.run(
-                    command,
-                    cwd=REPO_ROOT,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    timeout=3.0,
-                    check=False,
-                )
+                proc = _send_control_action(action)
             except subprocess.TimeoutExpired:
                 self._send_json(
                     {"ok": False, "error": "control_timeout", "action": action},
@@ -688,7 +731,7 @@ class SonicStationHandler(BaseHTTPRequestHandler):
 
         if path == "/motion/play":
             try:
-                motion_id, motion_name, motion_path = _resolve_motion_request(data)
+                motion_id, motion_name, motion_path, motion_source, motion_duration_sec = _resolve_motion_request(data)
             except ValueError as exc:
                 self._send_json(
                     {"ok": False, "error": "bad_request", "message": str(exc)},
@@ -735,9 +778,14 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                 updated_at=now,
                 log_path=str(log_path.relative_to(REPO_ROOT)),
                 command=command,
+                source=motion_source,
+                duration_sec=motion_duration_sec,
+                auto_idle_reset=(motion_source == "generated"),
             )
+            global _LATEST_PLAYBACK_ID
             with _PLAYBACK_LOCK:
                 _PLAYBACKS[playback_id] = job
+                _LATEST_PLAYBACK_ID = playback_id
             thread = threading.Thread(target=_run_playback_job, args=(playback_id,), daemon=True)
             thread.start()
             self._send_json(
