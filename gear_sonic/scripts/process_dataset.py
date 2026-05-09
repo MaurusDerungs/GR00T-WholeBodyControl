@@ -273,34 +273,53 @@ def process_single_dataset(
         valid_indices = None
 
         if remove_stale_smpl and SMPL_POSE_COLUMN in df.columns:
-            smpl_arr = np.vstack(
-                [np.asarray(x, dtype=np.float32) for x in df[SMPL_POSE_COLUMN]]
-            )
-            mask = build_stale_mask(smpl_arr)
-            n_remove = int(mask.sum())
-            n_zero = int(np.all(smpl_arr == 0, axis=1).sum())
-            n_frozen = n_remove - n_zero
-
-            if n_remove > 0:
-                stats["episodes_with_stale"] += 1
-                stats["frames_removed"] += n_remove
-                stats["zero_frames"] += n_zero
-                stats["frozen_leadin_frames"] += n_frozen
-                pct = 100.0 * n_remove / ep_len
-                print(
-                    f"  Episode {ep_idx}: removing {n_remove}/{ep_len} frames "
-                    f"({pct:.1f}%) — {n_zero} zero + {n_frozen} frozen lead-in"
+            # In stream_mode=6 (Quest/WBC), smpl_pose is all-zero by design
+            # (motion tokens are used instead). Skip stale-SMPL removal.
+            stream_mode_col = "teleop.stream_mode"
+            if stream_mode_col in df.columns:
+                modes = df[stream_mode_col].apply(
+                    lambda x: int(np.asarray(x).flat[0]) if x is not None else 0
                 )
+                if (modes == 6).all():
+                    remove_stale_smpl_this_ep = False
+                else:
+                    remove_stale_smpl_this_ep = True
+            else:
+                remove_stale_smpl_this_ep = True
 
-                if n_remove == ep_len:
-                    print(f"  Episode {ep_idx}: ALL frames stale — dropping episode")
-                    stats["episodes_dropped"] += 1
-                    continue
+            if remove_stale_smpl_this_ep:
+                smpl_arr = np.vstack(
+                    [np.asarray(x, dtype=np.float32) for x in df[SMPL_POSE_COLUMN]]
+                )
+                mask = build_stale_mask(smpl_arr)
+                n_remove = int(mask.sum())
+                n_zero = int(np.all(smpl_arr == 0, axis=1).sum())
+                n_frozen = n_remove - n_zero
 
-                valid_indices = np.where(~mask)[0]
-                df = df.iloc[valid_indices].copy().reset_index(drop=True)
-                if "timestamp" in df.columns:
-                    df["timestamp"] -= df["timestamp"].iloc[0]
+                if n_remove > 0:
+                    stats["episodes_with_stale"] += 1
+                    stats["frames_removed"] += n_remove
+                    stats["zero_frames"] += n_zero
+                    stats["frozen_leadin_frames"] += n_frozen
+                    pct = 100.0 * n_remove / ep_len
+                    print(
+                        f"  Episode {ep_idx}: removing {n_remove}/{ep_len} frames "
+                        f"({pct:.1f}%) — {n_zero} zero + {n_frozen} frozen lead-in"
+                    )
+
+                    if n_remove == ep_len:
+                        print(f"  Episode {ep_idx}: ALL frames stale — dropping episode")
+                        stats["episodes_dropped"] += 1
+                        continue
+
+                    valid_indices = np.where(~mask)[0]
+            else:
+                print(f"  Episode {ep_idx}: stream_mode=6 (Quest/WBC) — skipping stale-SMPL check")
+
+        if valid_indices is not None:
+            df = df.iloc[valid_indices].copy().reset_index(drop=True)
+            if "timestamp" in df.columns:
+                df["timestamp"] -= df["timestamp"].iloc[0]
 
         new_ep_idx = ep_idx + episode_index_offset
         processed_episodes.append({

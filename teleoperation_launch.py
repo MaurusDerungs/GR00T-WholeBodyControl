@@ -126,12 +126,13 @@ def create_session(with_camera: bool = False):
       pane 1 (right-top)    — teleop policy
       pane 2 (right-bottom) — data exporter / idle
 
-    With camera (5 panes):
+    With camera (6 panes):
       pane 0 (left)           — control loop
       pane 1 (right-top)      — teleop policy
       pane 2 (right-mid-top)  — Jetson GStreamer (SSH)
       pane 3 (right-mid-bot)  — camera ZMQ server
-      pane 4 (right-bottom)   — data exporter
+      pane 4 (right-mid-bot2) — data exporter
+      pane 5 (right-bottom)   — recording controller (press Enter to toggle)
     """
     kill_session()
     tmux("new-session", "-d", "-s", SESSION, "-x", "220", "-y", "60")
@@ -144,6 +145,7 @@ def create_session(with_camera: bool = False):
     if with_camera:
         tmux("split-window", "-t", f"{SESSION}:0.2", "-v")  # 3 right panes
         tmux("split-window", "-t", f"{SESSION}:0.3", "-v")  # 4 right panes
+        tmux("split-window", "-t", f"{SESSION}:0.4", "-v")  # 5 right panes (recording ctrl)
     tmux("select-pane", "-t", f"{SESSION}:0.0")
 
 
@@ -186,8 +188,8 @@ def main():
                         help="ZMQ port the camera server publishes on (default: 5555)")
     parser.add_argument("--jetson-ip", default=JETSON_IP, metavar="IP",
                         help=f"IP of the G1 Jetson (default: {JETSON_IP})")
-    parser.add_argument("--jetson-camera-device", default="/dev/video4", metavar="DEV",
-                        help="V4L2 device on the Jetson (default: /dev/video4 = RealSense color high-res). "
+    parser.add_argument("--jetson-camera-device", default="/dev/video5", metavar="DEV",
+                        help="V4L2 device on the Jetson (default: /dev/video5 = RealSense color high-res). "
                              "Run 'ls /dev/video*' on Jetson to find the right one.")
     parser.add_argument("--jetson-gst-format", default="auto",
                         choices=["auto", "mjpeg", "raw"],
@@ -335,6 +337,25 @@ def main():
                 f"--camera-port {args.camera_zmq_port}"
             )
             send(4, f"{hook}; {data_cmd}", wait=1)
+
+            # Pane 5 — recording controller
+            print("[launch] Starting recording controller …")
+            rec_ctrl_cmd = (
+                f"source {DATA_VENV}/bin/activate; cd {PROJECT}; "
+                f"{DATA_PYTHON} -c \""
+                f"import zmq, time; "
+                f"ctx = zmq.Context(); "
+                f"s = ctx.socket(zmq.PUB); "
+                f"s.bind('tcp://*:5580'); "
+                f"time.sleep(1.0); "
+                f"print('\\n  === RECORDING CONTROLLER ==='); "
+                f"print('  Press Enter → start/stop episode'); "
+                f"print('  Type x + Enter → discard episode'); "
+                f"print('  Type q + Enter → quit\\n'); "
+                f"[(__import__('time').sleep(0.1), s.send_string('x' if (k:=input('rec> ')) == 'x' else 'q' if k == 'q' else 'c') or (k == 'q' and __import__('sys').exit(0))) for _ in iter(int, 1)]"
+                f"\""
+            )
+            send(5, rec_ctrl_cmd, wait=1)
     else:
         send(2, "echo 'Recording disabled — pass --record to enable'", wait=0)
 
