@@ -1,0 +1,98 @@
+{
+  "name": "policy_preprocessor",
+  "steps": [
+    {
+      "registry_name": "rename_observations_processor",
+      "config": {
+        "rename_map": {}
+      }
+    },
+    {
+      "registry_name": "to_batch_processor",
+      "config": {}
+    },
+    {
+      "registry_name": "device_processor",
+      "config": {
+        "device": "cuda",
+        "float_dtype": null
+      }
+    },
+    {
+      "registry_name": "normalizer_processor",
+      "config": {
+        "eps": 1e-08,
+        "features": {
+          "observation.images.ego_view": {
+            "type": "VISUAL",
+            "shape": [
+              3,
+              480,
+              640
+            ]
+          },
+          "observation.state": {
+            "type": "STATE",
+            "shape": [
+              43
+            ]
+          },
+          "observation.eef_state": {
+            "type": "STATE",
+            "shape": [
+              14
+            ]
+          },
+          "observation.root_orientation": {
+            "type": "STATE",
+            "shape": [
+              4
+            ]
+          },
+          "observation.projected_gravity": {
+            "type": "STATE",
+            "shape": [
+              3
+            ]
+          },
+          "observation.cpp_rotation_offset": {
+            "type": "STATE",
+            "shape": [
+              4
+            ]
+          },
+          "observation.init_base_quat": {
+            "type": "STATE",
+            "shape": [
+              4
+            ]
+          },
+          "action.wbc": {
+            "type": "ACTION",
+            "shape": [
+              43
+            ]
+          },
+          "action.motion_token": {
+            "type": "ACTION",
+            "shape": [
+              64
+            ]
+          },
+          "action": {
+            "type": "ACTION",
+            "shape": [
+              43
+            ]
+          }
+        },
+        "norm_map": {
+          "VISUAL": "MEAN_STD",
+          "STATE": "MEAN_STD",
+          "ACTION": "MEAN_STD"
+        }
+      },
+      "state_file": "policy_preprocessor_step_3_normalizer_processor.safetensors"
+    }
+  ]
+}
