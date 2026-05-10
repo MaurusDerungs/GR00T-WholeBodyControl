@@ -68,7 +68,6 @@ if [ "$N_EPISODES" -lt 10 ]; then
 fi
 
 # ── Step 3: Train ───────────────────────────────────────────────────────────
-mkdir -p "$OUTPUT_DIR"
 
 echo ""
 echo "Starting ACT training..."
@@ -85,12 +84,11 @@ echo ""
     --policy.dim_model 512 \
     --policy.n_encoder_layers 4 \
     --policy.n_heads 8 \
-    --policy.use_vae true \
+    --policy.use_vae false \
     --policy.kl_weight 10.0 \
     --batch_size 8 \
     --steps 50000 \
     --log_freq 100 \
     --save_freq 5000 \
     --num_workers 4 \
-    --output_dir "$OUTPUT_DIR" \
-    "$@"
+    --output_dir "$OUTPUT_DIR"

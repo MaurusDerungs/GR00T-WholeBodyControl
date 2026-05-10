@@ -287,6 +287,38 @@ class ComposedCameraClientConfig:
 
 
 @dataclass
+class ActInferenceConfig(BaseConfig, ComposedCameraClientConfig):
+    """Config for running a LeRobot ACT checkpoint in the live control loop."""
+
+    act_checkpoint: str = ""
+    """Path to the LeRobot ACT checkpoint directory.
+
+    Accepts either a training checkpoint directory
+    (e.g. ``outputs/act_checkpoints/checkpoints/last``) or the inner
+    ``pretrained_model/`` directory directly. The policy auto-detects which
+    level was given.
+    """
+
+    act_device: Literal["cuda", "cpu"] = "cuda"
+    """Device for ACT inference."""
+
+    act_image_camera_key: str = "ego_view"
+    """Key under which the ego view frame is published by the camera server.
+    Must match `ComposedCameraConfig.ego_view_camera`'s mount name."""
+
+    act_hold_pose_on_startup_s: float = 1.0
+    """Seconds to hold the initial observed pose before starting to send
+    policy-generated actions. Gives the camera time to warm up and the
+    safety-monitor ramp time to converge."""
+
+    act_activate_wbc: bool = True
+    """Automatically activate the gear_wbc lower-body balance policy at
+    startup (equivalent to pressing ']' once in the teleop loop).  When
+    disabled, the legs just hold a nominal standing pose — which is what
+    you want for bench-top testing but not for a real deployment."""
+
+
+@dataclass
 class DataExporterConfig(BaseConfig, ComposedCameraClientConfig):
     """Config for running the G1 data exporter."""
 
