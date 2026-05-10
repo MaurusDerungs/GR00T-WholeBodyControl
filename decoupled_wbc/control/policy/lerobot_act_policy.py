@@ -62,10 +62,16 @@ class LerobotActPolicy(Policy):
         # Imports are local so that users who do not need inference do not pay
         # the cost of pulling in torch + lerobot at import time.
         import torch
-        from lerobot.common.policies.act.modeling_act import ACTPolicy
+        try:
+            from lerobot.common.policies.act.modeling_act import ACTPolicy
+            from lerobot.common.policies.factory import make_pre_post_processors
+        except ModuleNotFoundError:
+            from lerobot.policies.act.modeling_act import ACTPolicy
+            from lerobot.policies import make_pre_post_processors
 
         self._torch = torch
         self._ACTPolicy = ACTPolicy
+        self._make_pre_post_processors = make_pre_post_processors
 
         # Resolve checkpoint directory.  Both styles accepted:
         #   .../outputs/act_checkpoints/checkpoints/last
@@ -89,6 +95,18 @@ class LerobotActPolicy(Policy):
         self.policy.to(self.device)
         self.policy.eval()
         self.policy.reset()
+        self.preprocessor, self.postprocessor = self._make_pre_post_processors(
+            policy_cfg=self.policy.config,
+            pretrained_path=str(self.checkpoint_dir),
+            preprocessor_overrides={
+                "device_processor": {"device": str(self.device)},
+                "normalizer_processor": {"device": str(self.device)},
+            },
+            postprocessor_overrides={
+                "unnormalizer_processor": {"device": str(self.device)},
+                "device_processor": {"device": "cpu"},
+            },
+        )
         print(f"[ACT] Loaded. Device={self.device}, "
               f"chunk_size={self.policy.config.chunk_size}, "
               f"n_action_steps={self.policy.config.n_action_steps}")
@@ -135,12 +153,13 @@ class LerobotActPolicy(Policy):
             return {"q": self._last_action.copy()}
 
         # 2. Assemble the batch in the exact shape lerobot expects.
-        batch = self._build_batch(self._latest_q, image)
+        batch = self.preprocessor(self._build_batch(self._latest_q, image))
 
         # 3. Run ACT inference (returns one action; internal queue manages
         #    the action chunk under the hood).
         with self._torch.no_grad():
             action_tensor = self.policy.select_action(batch)
+            action_tensor = self.postprocessor(action_tensor)
         action = action_tensor.squeeze(0).detach().to("cpu").numpy().astype(np.float64)
 
         if action.shape[0] != self._latest_q.shape[0]:
