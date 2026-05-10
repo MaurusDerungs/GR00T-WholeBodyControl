@@ -49,6 +49,7 @@ _PLAYBACKS: dict[str, "PlaybackJob"] = {}
 _LATEST_PLAYBACK_ID = ""
 _CAMERA_VIEW_STORE: "CameraViewStore | None" = None
 _ZMQ_PUBLISHERS: dict[str, "StationZMQPublisher"] = {}
+_TELEOP_LAST_FACING: dict[str, list[float]] = {}
 _STATION_MODE = "sim"
 _ROBOT_INTERFACE = ""
 _ROBOT_IP = ""
@@ -839,7 +840,8 @@ class SonicStationHandler(BaseHTTPRequestHandler):
             try:
                 active = bool(data.get("active", False))
                 movement = [float(value) for value in data.get("movement", [0.0, 0.0, 0.0])[:3]]
-                facing = [float(value) for value in data.get("facing", [1.0, 0.0, 0.0])[:3]]
+                default_facing = _TELEOP_LAST_FACING.get(target, [1.0, 0.0, 0.0])
+                facing = [float(value) for value in data.get("facing", default_facing)[:3]]
                 speed = float(data.get("speed", -1.0))
                 height = float(data.get("height", -1.0))
             except (TypeError, ValueError):
@@ -854,6 +856,7 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                 )
                 return
+            _TELEOP_LAST_FACING[target] = facing
             speed = max(-1.0, min(0.8, speed))
             mode = SLOW_WALK if active and speed > 0.001 else IDLE
             if not active:

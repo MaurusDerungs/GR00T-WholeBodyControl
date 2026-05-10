@@ -57,6 +57,11 @@ STATION_SIM_PREVIEW="${STATION_SIM_PREVIEW:-true}"
 STATION_SIM_DEPLOY="${STATION_SIM_DEPLOY:-true}"
 STATION_ENABLE_ONSCREEN="${STATION_ENABLE_ONSCREEN:-false}"
 STATION_IMAGE_DT="${STATION_IMAGE_DT:-0.016667}"
+if [[ "$STATION_MODE" == "real" ]]; then
+  STATION_SIM_LOG_TO_FILE="${STATION_SIM_LOG_TO_FILE:-true}"
+else
+  STATION_SIM_LOG_TO_FILE="${STATION_SIM_LOG_TO_FILE:-false}"
+fi
 STATION_START_UI="${STATION_START_UI:-true}"
 STATION_UI_HOST="${STATION_UI_HOST:-127.0.0.1}"
 STATION_UI_PORT="${STATION_UI_PORT:-8765}"
@@ -189,14 +194,24 @@ python tools/sonic_station/create_station_idle_reference.py \
 
 SIM_PID=""
 if [[ "$STATION_SIM_PREVIEW" == "true" ]]; then
-  SONIC_STATION_CAMERA_VIEW_FILE="$STATION_CAMERA_VIEW_FILE" \
-  python gear_sonic/scripts/run_sim_loop.py \
-    --auto-disable-elastic-after-cmd-sec "$SIM_DISABLE_ELASTIC_DELAY_SEC" \
-    --enable-image-publish \
-    --enable-offscreen \
-    "$ONSCREEN_ARG" \
-    --image-dt "$STATION_IMAGE_DT" \
-    --camera-port "$STATION_CAMERA_PORT" &
+  SIM_COMMAND=(
+    python gear_sonic/scripts/run_sim_loop.py
+    --auto-disable-elastic-after-cmd-sec "$SIM_DISABLE_ELASTIC_DELAY_SEC"
+    --enable-image-publish
+    --enable-offscreen
+    "$ONSCREEN_ARG"
+    --image-dt "$STATION_IMAGE_DT"
+    --camera-port "$STATION_CAMERA_PORT"
+  )
+  if [[ "$STATION_SIM_LOG_TO_FILE" == "true" ]]; then
+    SONIC_STATION_CAMERA_VIEW_FILE="$STATION_CAMERA_VIEW_FILE" \
+      "${SIM_COMMAND[@]}" >"$STATION_LOG_DIR/sim.log" 2>&1 &
+    echo "MuJoCo preview log:"
+    echo "  $STATION_LOG_DIR/sim.log"
+  else
+    SONIC_STATION_CAMERA_VIEW_FILE="$STATION_CAMERA_VIEW_FILE" \
+      "${SIM_COMMAND[@]}" &
+  fi
   SIM_PID=$!
 fi
 
@@ -262,6 +277,12 @@ DEPLOY_ARGS=(
 if [[ "$STATION_MODE" == "sim" ]]; then
   DEPLOY_ARGS+=(--auto-control-start --yes sim)
 else
+  echo ""
+  echo "REAL robot deploy is manual:"
+  echo "  1. Press Y yourself at the deploy prompt."
+  echo "  2. Press ] yourself in the terminal once the robot is ready."
+  echo "No --yes or --auto-control-start is passed to the real robot deploy."
+  echo ""
   DEPLOY_ARGS+=("$STATION_ROBOT_INTERFACE")
 fi
 

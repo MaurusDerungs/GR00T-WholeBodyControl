@@ -504,7 +504,7 @@ async function setTeleopActive(active) {
     try {
       await api("/teleop", {
         method: "POST",
-        body: JSON.stringify({ active: false }),
+        body: JSON.stringify(teleopPayload()),
       });
     } catch (error) {
       log(`/teleop: ${error.message}`);
