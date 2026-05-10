@@ -47,11 +47,14 @@ STATION_CAMERA_PORT="${STATION_CAMERA_PORT:-5560}"
 STATION_CAMERA_PORT_MAX="${STATION_CAMERA_PORT_MAX:-5599}"
 STATION_RESERVED_PORTS="${STATION_RESERVED_PORTS:-5556 5557 5558}"
 STATION_ZMQ_PORT="${STATION_ZMQ_PORT:-5556}"
+STATION_SIM_ZMQ_PORT="${STATION_SIM_ZMQ_PORT:-5561}"
+STATION_SIM_ZMQ_OUT_PORT="${STATION_SIM_ZMQ_OUT_PORT:-5568}"
 STATION_ROBOT_IP="${STATION_ROBOT_IP:-}"
 if [[ "$STATION_MODE" == "real" && -z "$STATION_ROBOT_IP" ]]; then
   STATION_ROBOT_IP="192.168.123.164"
 fi
 STATION_SIM_PREVIEW="${STATION_SIM_PREVIEW:-true}"
+STATION_SIM_DEPLOY="${STATION_SIM_DEPLOY:-true}"
 STATION_ENABLE_ONSCREEN="${STATION_ENABLE_ONSCREEN:-false}"
 STATION_IMAGE_DT="${STATION_IMAGE_DT:-0.016667}"
 STATION_START_UI="${STATION_START_UI:-true}"
@@ -96,6 +99,9 @@ PY
 
 port_is_reserved() {
   local port="$1"
+  if [[ "$port" == "$STATION_ZMQ_PORT" || "$port" == "$STATION_SIM_ZMQ_PORT" || "$port" == "$STATION_SIM_ZMQ_OUT_PORT" ]]; then
+    return 0
+  fi
   for reserved_port in $STATION_RESERVED_PORTS; do
     if [[ "$port" == "$reserved_port" ]]; then
       return 0
@@ -149,6 +155,7 @@ if [[ "$STATION_START_UI" == "true" ]]; then
     --camera-port "$STATION_CAMERA_PORT" \
     --camera-view-file "$STATION_CAMERA_VIEW_FILE" \
     --zmq-port "$STATION_ZMQ_PORT" \
+    --sim-zmq-port "$([[ "$STATION_MODE" == "real" && "$STATION_SIM_PREVIEW" == "true" ]] && printf '%s' "$STATION_SIM_ZMQ_PORT" || printf '0')" \
     >"$STATION_LOG_DIR/backend.log" 2>&1 &
   BACKEND_PID=$!
   sleep 1
@@ -193,7 +200,45 @@ if [[ "$STATION_SIM_PREVIEW" == "true" ]]; then
   SIM_PID=$!
 fi
 
+SIM_DEPLOY_PID=""
+if [[ "$STATION_MODE" == "real" && "$STATION_SIM_PREVIEW" == "true" && "$STATION_SIM_DEPLOY" == "true" ]]; then
+  (
+    cd "$DEPLOY_DIR"
+    set +e
+    # shellcheck disable=SC1091
+    source scripts/setup_env.sh
+    set -e
+    just build
+  )
+  (
+    cd "$DEPLOY_DIR"
+    set +e
+    # shellcheck disable=SC1091
+    source scripts/setup_env.sh
+    set -e
+    just run g1_deploy_onnx_ref lo policy/release/model_decoder.onnx "$STATION_MOTION_DATA" \
+      --obs-config policy/release/observation_config.yaml \
+      --encoder-file policy/release/model_encoder.onnx \
+      --planner-file planner/target_vel/V2/planner_sonic.onnx \
+      --input-type zmq_manager \
+      --output-type zmq \
+      --zmq-host localhost \
+      --zmq-port "$STATION_SIM_ZMQ_PORT" \
+      --zmq-out-port "$STATION_SIM_ZMQ_OUT_PORT" \
+      --disable-crc-check \
+      --auto-control-start
+  ) >"$STATION_LOG_DIR/sim_deploy.log" 2>&1 &
+  SIM_DEPLOY_PID=$!
+  echo "Simulation playback controller:"
+  echo "  port: $STATION_SIM_ZMQ_PORT"
+  echo "  log:  $STATION_LOG_DIR/sim_deploy.log"
+fi
+
 cleanup() {
+  if [[ -n "$SIM_DEPLOY_PID" ]] && kill -0 "$SIM_DEPLOY_PID" >/dev/null 2>&1; then
+    kill "$SIM_DEPLOY_PID" >/dev/null 2>&1 || true
+    wait "$SIM_DEPLOY_PID" >/dev/null 2>&1 || true
+  fi
   if [[ -n "$SIM_PID" ]] && kill -0 "$SIM_PID" >/dev/null 2>&1; then
     kill "$SIM_PID" >/dev/null 2>&1 || true
     wait "$SIM_PID" >/dev/null 2>&1 || true

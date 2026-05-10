@@ -48,7 +48,7 @@ _PLAYBACK_LOCK = threading.Lock()
 _PLAYBACKS: dict[str, "PlaybackJob"] = {}
 _LATEST_PLAYBACK_ID = ""
 _CAMERA_VIEW_STORE: "CameraViewStore | None" = None
-_ZMQ_PUBLISHER: "StationZMQPublisher | None" = None
+_ZMQ_PUBLISHERS: dict[str, "StationZMQPublisher"] = {}
 _STATION_MODE = "sim"
 _ROBOT_INTERFACE = ""
 _ROBOT_IP = ""
@@ -318,6 +318,7 @@ class PlaybackJob:
     source: str = ""
     duration_sec: float | None = None
     auto_idle_reset: bool = False
+    target: str = "sim"
 
 
 def _slugify(value: str, fallback: str) -> str:
@@ -403,10 +404,12 @@ def _resolve_motion_request(data: dict) -> tuple[str, str, str, str, float | Non
     raise ValueError(f"motion not found: {requested}")
 
 
-def _publisher_or_raise() -> StationZMQPublisher:
-    if _ZMQ_PUBLISHER is None:
-        raise RuntimeError("Sonic Station ZMQ publisher is not available")
-    return _ZMQ_PUBLISHER
+def _publisher_or_raise(target: str | None = None) -> StationZMQPublisher:
+    target_name = target or ("robot" if _STATION_MODE == "real" else "sim")
+    publisher = _ZMQ_PUBLISHERS.get(target_name)
+    if publisher is None:
+        raise RuntimeError(f"Sonic Station ZMQ publisher is not available for target: {target_name}")
+    return publisher
 
 
 def _robot_reachable() -> bool | None:
@@ -425,7 +428,7 @@ def _robot_reachable() -> bool | None:
     return proc.returncode == 0
 
 
-def _send_control_action(action: str) -> None:
+def _send_control_action(action: str, *, target: str | None = None) -> None:
     actions = {
         "emergency_stop": dict(start=False, stop=True, planner=True),
         "idle_reset": dict(start=False, stop=False, planner=True, idle_reset=True),
@@ -433,7 +436,7 @@ def _send_control_action(action: str) -> None:
     }
     if action not in actions:
         raise ValueError(f"unknown control action: {action}")
-    publisher = _publisher_or_raise()
+    publisher = _publisher_or_raise(target)
     for _ in range(8):
         publisher.send_command(**actions[action])
         time.sleep(0.04)
@@ -506,12 +509,13 @@ def _run_playback_job(playback_id: str) -> None:
         log_path = REPO_ROOT / log_path
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if _ZMQ_PUBLISHER is None:
+    publisher = _ZMQ_PUBLISHERS.get(job.target)
+    if publisher is None:
         _update_playback(
             playback_id,
             status="failed",
             finished_at=time.time(),
-            error="Sonic Station ZMQ publisher is not available",
+            error=f"Sonic Station ZMQ publisher is not available for target: {job.target}",
             returncode=127,
         )
         return
@@ -524,7 +528,7 @@ def _run_playback_job(playback_id: str) -> None:
             motion_path = Path(job.motion_path)
             if not motion_path.is_absolute():
                 motion_path = REPO_ROOT / motion_path
-            _ZMQ_PUBLISHER.stream_motion(motion_path, startup_delay=1.0)
+            publisher.stream_motion(motion_path, startup_delay=1.0)
             returncode = 0
         except Exception as exc:
             log.write(f"\n{exc}\n")
@@ -540,7 +544,7 @@ def _run_playback_job(playback_id: str) -> None:
                 is_latest_playback = playback_id == _LATEST_PLAYBACK_ID
             if is_latest_playback:
                 try:
-                    _send_control_action("idle_reset")
+                    _send_control_action("idle_reset", target=job.target)
                     with log_path.open("a", encoding="utf-8") as log:
                         log.write("\n$ auto idle_reset\n")
                         log.write("Control action streamed.\n")
@@ -652,6 +656,7 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                     "robot_interface": _ROBOT_INTERFACE,
                     "robot_ip": _ROBOT_IP,
                     "robot_reachable": _robot_reachable(),
+                    "targets": sorted(_ZMQ_PUBLISHERS.keys()),
                     "endpoints": [
                         "/health",
                         "/motions",
@@ -798,15 +803,16 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                 )
                 return
-            if _ZMQ_PUBLISHER is None:
+            target = str(data.get("target") or ("robot" if _STATION_MODE == "real" else "sim")).strip()
+            if target not in _ZMQ_PUBLISHERS:
                 self._send_json(
-                    {"ok": False, "error": "zmq_publisher_unavailable"},
+                    {"ok": False, "error": "zmq_publisher_unavailable", "target": target},
                     HTTPStatus.SERVICE_UNAVAILABLE,
                 )
                 return
 
             try:
-                _send_control_action(action)
+                _send_control_action(action, target=target)
             except Exception as exc:
                 self._send_json(
                     {
@@ -822,8 +828,13 @@ class SonicStationHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/teleop":
-            if _ZMQ_PUBLISHER is None:
-                self._send_json({"ok": False, "error": "zmq_publisher_unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+            target = str(data.get("target") or ("robot" if _STATION_MODE == "real" else "sim")).strip()
+            publisher = _ZMQ_PUBLISHERS.get(target)
+            if publisher is None:
+                self._send_json(
+                    {"ok": False, "error": "zmq_publisher_unavailable", "target": target},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
                 return
             try:
                 active = bool(data.get("active", False))
@@ -849,8 +860,8 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                 movement = [0.0, 0.0, 0.0]
                 speed = -1.0
             try:
-                _ZMQ_PUBLISHER.send_command(start=active, stop=False, planner=True)
-                _ZMQ_PUBLISHER.send_planner(mode=mode, movement=movement, facing=facing, speed=speed, height=height)
+                publisher.send_command(start=active, stop=False, planner=True)
+                publisher.send_planner(mode=mode, movement=movement, facing=facing, speed=speed, height=height)
             except Exception as exc:
                 self._send_json(
                     {"ok": False, "error": "teleop_failed", "message": str(exc)},
@@ -861,6 +872,23 @@ class SonicStationHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/motion/play":
+            target = str(data.get("target") or ("robot" if _STATION_MODE == "real" else "sim")).strip()
+            if target not in _ZMQ_PUBLISHERS:
+                self._send_json(
+                    {"ok": False, "error": "zmq_publisher_unavailable", "target": target},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
+            if target == "robot" and _robot_reachable() is False:
+                self._send_json(
+                    {
+                        "ok": False,
+                        "error": "robot_offline",
+                        "message": f"robot is not reachable at {_ROBOT_IP or _ROBOT_INTERFACE or 'unknown target'}",
+                    },
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
             try:
                 motion_id, motion_name, motion_path, motion_source, motion_duration_sec = _resolve_motion_request(data)
             except ValueError as exc:
@@ -912,6 +940,7 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                 source=motion_source,
                 duration_sec=motion_duration_sec,
                 auto_idle_reset=(motion_source == "generated"),
+                target=target,
             )
             global _LATEST_PLAYBACK_ID
             with _PLAYBACK_LOCK:
@@ -1006,16 +1035,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--camera-view-file", type=Path, default=REPO_ROOT / ".sonic_station" / "camera_view.json")
     parser.add_argument("--zmq-bind-host", default="*")
     parser.add_argument("--zmq-port", type=int, default=5556)
+    parser.add_argument("--sim-zmq-port", type=int, default=0)
     return parser.parse_args()
 
 
 def main() -> None:
-    global _CAMERA_STORE, _CAMERA_VIEW_STORE, _ZMQ_PUBLISHER, _STATION_MODE, _ROBOT_INTERFACE, _ROBOT_IP
+    global _CAMERA_STORE, _CAMERA_VIEW_STORE, _ZMQ_PUBLISHERS, _STATION_MODE, _ROBOT_INTERFACE, _ROBOT_IP
     args = parse_args()
     _STATION_MODE = args.station_mode
     _ROBOT_INTERFACE = args.robot_interface
     _ROBOT_IP = args.robot_ip
-    _ZMQ_PUBLISHER = StationZMQPublisher(args.zmq_bind_host, args.zmq_port)
+    _ZMQ_PUBLISHERS = {}
+    if args.station_mode == "real":
+        _ZMQ_PUBLISHERS["robot"] = StationZMQPublisher(args.zmq_bind_host, args.zmq_port)
+        if args.sim_zmq_port > 0:
+            _ZMQ_PUBLISHERS["sim"] = StationZMQPublisher(args.zmq_bind_host, args.sim_zmq_port)
+    else:
+        _ZMQ_PUBLISHERS["sim"] = StationZMQPublisher(args.zmq_bind_host, args.zmq_port)
     if not args.camera_disabled:
         _CAMERA_STORE = CameraFrameStore(args.camera_host, args.camera_port)
         _CAMERA_STORE.start()
@@ -1030,6 +1066,8 @@ def main() -> None:
     if args.robot_ip:
         print(f"  robot:   {args.robot_ip}")
     print(f"  command: tcp://{args.zmq_bind_host}:{args.zmq_port}")
+    if args.sim_zmq_port > 0:
+        print(f"  sim cmd: tcp://{args.zmq_bind_host}:{args.sim_zmq_port}")
     if args.camera_disabled:
         print("  camera:  disabled")
     else:
@@ -1041,8 +1079,8 @@ def main() -> None:
     finally:
         if _CAMERA_STORE is not None:
             _CAMERA_STORE.stop()
-        if _ZMQ_PUBLISHER is not None:
-            _ZMQ_PUBLISHER.close()
+        for publisher in _ZMQ_PUBLISHERS.values():
+            publisher.close()
         server.server_close()
 
 

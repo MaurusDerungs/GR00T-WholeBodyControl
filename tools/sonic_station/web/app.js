@@ -6,6 +6,7 @@ const state = {
   robotInterface: "",
   robotIp: "",
   robotReachable: null,
+  targets: [],
   busyGenerate: false,
   busyPlay: new Set(),
   playCooldownUntil: new Map(),
@@ -118,8 +119,13 @@ function statusClass(status) {
   return `status-${status || "unknown"}`;
 }
 
+function targetAvailable(target) {
+  if (!state.targets.includes(target)) return false;
+  return target !== "robot" || state.robotReachable === true;
+}
+
 function robotControlsAvailable() {
-  return state.stationMode !== "real" || state.robotReachable === true;
+  return state.stationMode !== "real" || targetAvailable("robot");
 }
 
 function renderMotionList(container, source) {
@@ -133,17 +139,32 @@ function renderMotionList(container, source) {
   for (const motion of motions) {
     const item = document.createElement("article");
     item.className = "motion-item";
-    const disabled =
+    const simDisabled =
       !motion.valid ||
       state.busyPlay.has(motion.id) ||
       (state.playCooldownUntil.get(motion.id) || 0) > Date.now() ||
-      !robotControlsAvailable();
-    const playLabel =
+      !targetAvailable("sim");
+    const robotDisabled =
+      !motion.valid ||
+      state.busyPlay.has(motion.id) ||
+      (state.playCooldownUntil.get(motion.id) || 0) > Date.now() ||
+      !targetAvailable("robot");
+    const robotLabel = state.robotReachable === true ? "Play on Robot" : "Robot Offline";
+    const actionsHtml =
       state.stationMode === "real"
-        ? state.robotReachable === true
-          ? "Play on Robot"
-          : "Robot Offline"
-        : "Play in Sim";
+        ? `
+          <button class="primary" ${simDisabled ? "disabled" : ""} data-target="sim" data-motion-id="${motion.id}">
+            Play in Sim
+          </button>
+          <button class="danger" ${robotDisabled ? "disabled" : ""} data-target="robot" data-motion-id="${motion.id}">
+            ${robotLabel}
+          </button>
+        `
+        : `
+          <button class="primary" ${simDisabled ? "disabled" : ""} data-target="sim" data-motion-id="${motion.id}">
+            Play in Sim
+          </button>
+        `;
     item.innerHTML = `
       <div class="motion-title">
         <strong>${motion.name}</strong>
@@ -154,12 +175,12 @@ function renderMotionList(container, source) {
         ${motion.timesteps ?? 0} frames · ${motion.path}
       </div>
       <div class="motion-actions">
-        <button class="${state.stationMode === "real" ? "danger" : "primary"}" ${disabled ? "disabled" : ""} data-motion-id="${motion.id}">
-          ${playLabel}
-        </button>
+        ${actionsHtml}
       </div>
     `;
-    item.querySelector("button").addEventListener("click", () => playMotion(motion.id));
+    for (const button of item.querySelectorAll("button")) {
+      button.addEventListener("click", () => playMotion(motion.id, button.dataset.target || "sim"));
+    }
     container.appendChild(item);
   }
 }
@@ -227,6 +248,7 @@ async function refresh({ quiet = false } = {}) {
     state.robotInterface = health.robot_interface || "";
     state.robotIp = health.robot_ip || "";
     state.robotReachable = health.robot_reachable;
+    state.targets = health.targets || [];
     el.healthText.textContent = `${health.service} · ${health.repo_root}`;
     el.stationMode.textContent =
       state.stationMode === "real"
@@ -365,10 +387,14 @@ async function generateMotion(event) {
   }
 }
 
-async function playMotion(motionId) {
+async function playMotion(motionId, target = state.stationMode === "real" ? "robot" : "sim") {
   if (state.busyPlay.has(motionId) || (state.playCooldownUntil.get(motionId) || 0) > Date.now()) return;
-  if (!robotControlsAvailable()) {
-    log(`Robot offline: cannot play on ${state.robotIp || state.robotInterface || "robot"}.`);
+  if (!targetAvailable(target)) {
+    log(
+      target === "robot"
+        ? `Robot offline: cannot play on ${state.robotIp || state.robotInterface || "robot"}.`
+        : "Simulation target unavailable.",
+    );
     return;
   }
 
@@ -378,9 +404,9 @@ async function playMotion(motionId) {
   try {
     const result = await api("/motion/play", {
       method: "POST",
-      body: JSON.stringify({ motion_id: motionId, startup_delay: 1.0 }),
+      body: JSON.stringify({ motion_id: motionId, startup_delay: 1.0, target }),
     });
-    log(`${state.stationMode === "real" ? "Robot" : "Sim"} playback queued: ${result.playback.motion_name}`);
+    log(`${target === "robot" ? "Robot" : "Sim"} playback queued: ${result.playback.motion_name}`);
     await refresh({ quiet: true });
   } catch (error) {
     log(error.message);
