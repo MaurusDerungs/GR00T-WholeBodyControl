@@ -79,6 +79,7 @@ def _motion_info(source: str, motion_dir: Path) -> MotionInfo:
 
 def discover_motions() -> list[MotionInfo]:
     groups = (
+        ("curated", REFERENCE_ROOT / "dance_loop"),
         ("generated", REFERENCE_ROOT / "kimodo"),
         ("predefined", REFERENCE_ROOT / "example"),
     )
