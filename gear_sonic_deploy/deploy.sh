@@ -219,6 +219,7 @@ show_usage() {
     echo "  --output-type TYPE      Set the output type (default: ros2)"
     echo "  --zmq-host HOST         Set the ZMQ host (default: localhost)"
     echo "  --zmq-port PORT         Set the ZMQ port (default: 5556)"
+    echo "  --zmq-out-port PORT     Set the ZMQ debug output port (default: 5557)"
     echo ""
     echo "Interface modes:"
     echo "  sim              Use loopback interface for simulation (MuJoCo)"
@@ -251,6 +252,7 @@ INPUT_TYPE_DEFAULT="manager"
 OUTPUT_TYPE_DEFAULT="all"
 ZMQ_HOST_DEFAULT="localhost"
 ZMQ_PORT_DEFAULT="5556"
+ZMQ_OUT_PORT_DEFAULT="5557"
 AUTO_MOTION_LOOP_DEFAULT="false"
 AUTO_MOTION_START_DELAY_DEFAULT="0"
 AUTO_MOTION_PLAYBACK_START_INDEX_DEFAULT="0"
@@ -266,6 +268,7 @@ INPUT_TYPE="$INPUT_TYPE_DEFAULT"
 OUTPUT_TYPE="$OUTPUT_TYPE_DEFAULT"
 ZMQ_HOST="$ZMQ_HOST_DEFAULT"
 ZMQ_PORT="$ZMQ_PORT_DEFAULT"
+ZMQ_OUT_PORT="$ZMQ_OUT_PORT_DEFAULT"
 AUTO_MOTION_LOOP="$AUTO_MOTION_LOOP_DEFAULT"
 AUTO_MOTION_START_DELAY="$AUTO_MOTION_START_DELAY_DEFAULT"
 AUTO_MOTION_PLAYBACK_START_INDEX="$AUTO_MOTION_PLAYBACK_START_INDEX_DEFAULT"
@@ -369,6 +372,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             ZMQ_PORT="$2"
+            shift 2
+            ;;
+        --zmq-out-port)
+            if [[ -z "$2" ]]; then
+                echo -e "${RED}Error: --zmq-out-port requires a port argument${NC}" >&2
+                exit 1
+            fi
+            ZMQ_OUT_PORT="$2"
             shift 2
             ;;
         sim|real)
@@ -592,6 +603,7 @@ echo -e "  Input Type:         ${GREEN}$INPUT_TYPE${NC}"
 echo -e "  Output Type:        ${GREEN}$OUTPUT_TYPE${NC}"
 echo -e "  ZMQ Host:           ${GREEN}$ZMQ_HOST${NC}"
 echo -e "  ZMQ Port:           ${GREEN}$ZMQ_PORT${NC}"
+echo -e "  ZMQ Output Port:    ${GREEN}$ZMQ_OUT_PORT${NC}"
 if [[ -n "$EXTRA_ARGS" ]]; then
 echo -e "  Extra Args:         ${GREEN}$EXTRA_ARGS${NC}"
 fi
@@ -607,7 +619,8 @@ echo -e "${BLUE}    --planner-file $PLANNER \\${NC}"
 echo -e "${BLUE}    --input-type $INPUT_TYPE \\${NC}"
 echo -e "${BLUE}    --output-type $OUTPUT_TYPE \\${NC}"
 echo -e "${BLUE}    --zmq-host $ZMQ_HOST \\${NC}"
-echo -e "${BLUE}    --zmq-port $ZMQ_PORT${NC}"
+echo -e "${BLUE}    --zmq-port $ZMQ_PORT \\${NC}"
+echo -e "${BLUE}    --zmq-out-port $ZMQ_OUT_PORT${NC}"
 if [[ -n "$EXTRA_ARGS" ]]; then
 echo -e "${BLUE}    $EXTRA_ARGS${NC}"
 fi
@@ -644,6 +657,7 @@ if [[ "$confirm" =~ ^[Yy]$ ]] || [[ -z "$confirm" ]]; then
             --output-type "$OUTPUT_TYPE" \
             --zmq-host "$ZMQ_HOST" \
             --zmq-port "$ZMQ_PORT" \
+            --zmq-out-port "$ZMQ_OUT_PORT" \
             $EXTRA_ARGS
     else
         just run g1_deploy_onnx_ref "$TARGET" "$CHECKPOINT_DECODER" "$MOTION_DATA" \
@@ -653,7 +667,8 @@ if [[ "$confirm" =~ ^[Yy]$ ]] || [[ -z "$confirm" ]]; then
             --input-type "$INPUT_TYPE" \
             --output-type "$OUTPUT_TYPE" \
             --zmq-host "$ZMQ_HOST" \
-            --zmq-port "$ZMQ_PORT"
+            --zmq-port "$ZMQ_PORT" \
+            --zmq-out-port "$ZMQ_OUT_PORT"
     fi
 else
     echo ""
