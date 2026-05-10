@@ -47,11 +47,6 @@ STATION_CAMERA_PORT="${STATION_CAMERA_PORT:-5560}"
 STATION_CAMERA_PORT_MAX="${STATION_CAMERA_PORT_MAX:-5599}"
 STATION_RESERVED_PORTS="${STATION_RESERVED_PORTS:-5556 5557 5558}"
 STATION_ZMQ_PORT="${STATION_ZMQ_PORT:-5556}"
-STATION_ROBOT_IP="${STATION_ROBOT_IP:-}"
-if [[ "$STATION_MODE" == "real" && -z "$STATION_ROBOT_IP" ]]; then
-  STATION_ROBOT_IP="192.168.123.164"
-fi
-STATION_SIM_PREVIEW="${STATION_SIM_PREVIEW:-true}"
 STATION_ENABLE_ONSCREEN="${STATION_ENABLE_ONSCREEN:-false}"
 STATION_IMAGE_DT="${STATION_IMAGE_DT:-0.016667}"
 STATION_START_UI="${STATION_START_UI:-true}"
@@ -104,7 +99,7 @@ port_is_reserved() {
   return 1
 }
 
-if [[ "$STATION_SIM_PREVIEW" == "true" ]]; then
+if [[ "$STATION_MODE" == "sim" ]]; then
   REQUESTED_CAMERA_PORT="$STATION_CAMERA_PORT"
   while port_is_reserved "$STATION_CAMERA_PORT" || ! port_is_free "0.0.0.0" "$STATION_CAMERA_PORT"; do
     if [[ "$STATION_CAMERA_PORT" -ge "$STATION_CAMERA_PORT_MAX" ]]; then
@@ -144,11 +139,11 @@ if [[ "$STATION_START_UI" == "true" ]]; then
     --port "$STATION_UI_PORT" \
     --station-mode "$STATION_MODE" \
     --robot-interface "$STATION_ROBOT_INTERFACE" \
-    --robot-ip "$STATION_ROBOT_IP" \
     --camera-host localhost \
     --camera-port "$STATION_CAMERA_PORT" \
     --camera-view-file "$STATION_CAMERA_VIEW_FILE" \
     --zmq-port "$STATION_ZMQ_PORT" \
+    $([[ "$STATION_MODE" == "real" ]] && printf '%s' "--camera-disabled") \
     >"$STATION_LOG_DIR/backend.log" 2>&1 &
   BACKEND_PID=$!
   sleep 1
@@ -161,9 +156,7 @@ if [[ "$STATION_START_UI" == "true" ]]; then
     exit 1
   fi
   if [[ "$STATION_MODE" == "real" ]]; then
-    echo "Sonic Station UI (REAL ROBOT armed on $STATION_ROBOT_INTERFACE, preview sim enabled):"
-    echo "Robot reachability target:"
-    echo "  $STATION_ROBOT_IP"
+    echo "Sonic Station UI (REAL ROBOT armed on $STATION_ROBOT_INTERFACE):"
   else
     echo "Sonic Station UI:"
   fi
@@ -181,7 +174,7 @@ python tools/sonic_station/create_station_idle_reference.py \
   --force
 
 SIM_PID=""
-if [[ "$STATION_SIM_PREVIEW" == "true" ]]; then
+if [[ "$STATION_MODE" == "sim" ]]; then
   SONIC_STATION_CAMERA_VIEW_FILE="$STATION_CAMERA_VIEW_FILE" \
   python gear_sonic/scripts/run_sim_loop.py \
     --auto-disable-elastic-after-cmd-sec "$SIM_DISABLE_ELASTIC_DELAY_SEC" \

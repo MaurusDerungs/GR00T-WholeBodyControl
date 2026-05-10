@@ -138,12 +138,6 @@ h2 {
   border-bottom-color: #7b1d24;
 }
 
-.robot-offline .mode-real {
-  border-color: #e7bd58;
-  background: #3b2a08;
-  color: #ffe3a3;
-}
-
 .reset-bar {
   display: flex;
   flex-wrap: wrap;
