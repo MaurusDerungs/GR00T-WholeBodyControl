@@ -46,7 +46,6 @@ const el = {
   teleopDialog: document.querySelector("#teleopDialog"),
   statusLog: document.querySelector("#statusLog"),
   generatedList: document.querySelector("#generatedList"),
-  curatedList: document.querySelector("#curatedList"),
   predefinedList: document.querySelector("#predefinedList"),
   jobsList: document.querySelector("#jobsList"),
   playbacksList: document.querySelector("#playbacksList"),
@@ -115,6 +114,11 @@ function formatDuration(motion) {
   return `${motion.duration_sec.toFixed(1)}s`;
 }
 
+function formatMode(motion) {
+  if (motion.source !== "predefined") return motion.source;
+  return motion.name.endsWith("_M") ? "planner" : "normal";
+}
+
 function statusClass(status) {
   return `status-${status || "unknown"}`;
 }
@@ -171,7 +175,7 @@ function renderMotionList(container, source) {
         <span class="pill">${formatDuration(motion)}</span>
       </div>
       <div class="motion-meta">
-        ${motion.id}<br />
+        ${motion.id} · ${formatMode(motion)}<br />
         ${motion.timesteps ?? 0} frames · ${motion.path}
       </div>
       <div class="motion-actions">
@@ -217,7 +221,6 @@ function render() {
   el.playbackCount.textContent = `${state.playbacks.length} playbacks`;
 
   renderMotionList(el.generatedList, "generated");
-  renderMotionList(el.curatedList, "curated");
   renderMotionList(el.predefinedList, "predefined");
   renderActivityList(el.jobsList, state.jobs, "jobs");
   renderActivityList(el.playbacksList, state.playbacks, "playbacks");

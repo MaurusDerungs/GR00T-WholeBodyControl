@@ -208,7 +208,7 @@ h2 {
 
 .control-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 0.72fr) minmax(520px, 1.55fr) minmax(300px, 0.78fr);
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 0.8fr);
   gap: 14px;
   margin-top: 16px;
 }
@@ -222,7 +222,7 @@ h2 {
 
 .motion-layout {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
   gap: 14px;
   margin-top: 14px;
 }
@@ -252,134 +252,21 @@ h2 {
 
 .prompt-panel,
 .log-panel {
-  min-height: 430px;
+  min-height: 236px;
 }
 
 .prompt-panel {
-  position: relative;
-  overflow: hidden;
-  border-color: rgba(255, 174, 74, 0.98);
-  background:
-    radial-gradient(circle at 18% 18%, rgba(255, 174, 74, 0.36), transparent 34%),
-    radial-gradient(circle at 88% 8%, rgba(255, 98, 43, 0.22), transparent 30%),
-    linear-gradient(145deg, rgba(128, 62, 14, 0.42), rgba(153, 74, 28, 0.3) 42%, rgba(8, 12, 16, 0.98)),
-    var(--panel);
-  box-shadow:
-    0 0 0 1px rgba(255, 174, 74, 0.48),
-    0 0 24px rgba(255, 174, 74, 0.46),
-    0 0 58px rgba(255, 120, 43, 0.34),
-    0 0 104px rgba(255, 82, 22, 0.22),
-    0 18px 54px rgba(0, 0, 0, 0.66);
-}
-
-.prompt-panel::before {
-  content: "";
-  position: absolute;
-  inset: -40% -30%;
-  border-radius: inherit;
-  background:
-    linear-gradient(112deg, transparent 28%, rgba(255, 255, 255, 0.58) 42%, rgba(255, 197, 91, 0.52) 48%, transparent 62%),
-    linear-gradient(124deg, transparent 10%, rgba(255, 111, 32, 0.44), rgba(255, 213, 120, 0.26), transparent 78%);
-  opacity: 0.82;
-  pointer-events: none;
-  animation: prompt-sheen 2.45s linear infinite;
-  mix-blend-mode: screen;
-}
-
-.prompt-panel::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  background:
-    linear-gradient(90deg, rgba(255, 174, 74, 0.78), transparent 28%, transparent 70%, rgba(255, 98, 43, 0.68)),
-    radial-gradient(circle at 50% 105%, rgba(255, 219, 126, 0.5), transparent 36%);
-  filter: blur(18px);
-  opacity: 0.58;
-  pointer-events: none;
-}
-
-.prompt-panel > * {
-  position: relative;
-  z-index: 1;
-}
-
-.prompt-panel .panel-head {
-  background: linear-gradient(90deg, rgba(255, 174, 74, 0.26), rgba(255, 98, 43, 0.16));
-  border-bottom-color: rgba(255, 174, 74, 0.72);
-}
-
-.prompt-panel h2 {
-  color: #ffffff;
-  text-shadow:
-    0 0 10px rgba(255, 255, 255, 0.52),
-    0 0 22px rgba(255, 174, 74, 0.9),
-    0 0 44px rgba(255, 98, 43, 0.5);
-}
-
-.prompt-panel h2::after {
-  content: "LIVE PROMPT";
-  margin-left: 10px;
-  border: 1px solid rgba(255, 213, 120, 0.94);
-  border-radius: 999px;
-  color: #fff3d4;
-  background: rgba(91, 44, 8, 0.86);
-  box-shadow:
-    0 0 14px rgba(255, 174, 74, 0.46),
-    inset 0 0 10px rgba(255, 213, 120, 0.16);
-  font-size: 10px;
-  font-weight: 800;
-  padding: 4px 8px;
-  vertical-align: middle;
-}
-
-.prompt-panel button[type="submit"] {
-  border-color: rgba(255, 213, 120, 0.98);
-  background: linear-gradient(135deg, #ff9f1c, #d85f18 58%, #8f2d11);
-  box-shadow:
-    0 0 18px rgba(255, 174, 74, 0.5),
-    0 0 36px rgba(255, 98, 43, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  font-weight: 760;
-}
-
-.prompt-panel textarea {
-  min-height: 244px;
-  border-color: rgba(255, 174, 74, 0.92);
-  background:
-    linear-gradient(180deg, rgba(6, 11, 14, 0.84), rgba(0, 0, 0, 0.72)),
-    rgba(0, 0, 0, 0.8);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    inset 0 0 24px rgba(255, 174, 74, 0.1),
-    0 0 22px rgba(255, 174, 74, 0.34),
-    0 0 48px rgba(255, 98, 43, 0.18);
-}
-
-.prompt-panel textarea:focus {
-  border-color: #ffe0a3;
-  box-shadow:
-    0 0 0 2px rgba(255, 213, 120, 0.24),
-    0 0 30px rgba(255, 174, 74, 0.42),
-    0 0 68px rgba(255, 98, 43, 0.3);
-}
-
-@keyframes prompt-sheen {
-  from {
-    transform: translateX(-65%);
-  }
-  to {
-    transform: translateX(65%);
-  }
+  background: var(--panel);
 }
 
 .sim-panel {
-  min-height: 430px;
+  grid-row: span 2;
+  min-height: 650px;
 }
 
 .sim-frame {
   position: relative;
-  height: 378px;
+  height: 598px;
   margin: 0;
   overflow: hidden;
   background: #080b0d;
@@ -502,6 +389,10 @@ pre {
   overflow: auto;
 }
 
+.predefined-panel .motion-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .motion-item,
 .activity-item {
   display: grid;
@@ -583,6 +474,10 @@ pre {
   .sim-frame {
     height: min(62vw, 520px);
     min-height: 280px;
+  }
+
+  .predefined-panel .motion-list {
+    grid-template-columns: 1fr;
   }
 }
 
