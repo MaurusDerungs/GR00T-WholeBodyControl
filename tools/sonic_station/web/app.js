@@ -4,6 +4,8 @@ const state = {
   playbacks: [],
   stationMode: "unknown",
   robotInterface: "",
+  robotIp: "",
+  robotReachable: null,
   busyGenerate: false,
   busyPlay: new Set(),
   playCooldownUntil: new Map(),
@@ -116,6 +118,10 @@ function statusClass(status) {
   return `status-${status || "unknown"}`;
 }
 
+function robotControlsAvailable() {
+  return state.stationMode !== "real" || state.robotReachable === true;
+}
+
 function renderMotionList(container, source) {
   const motions = state.motions.filter((motion) => motion.source === source);
   container.innerHTML = "";
@@ -130,7 +136,14 @@ function renderMotionList(container, source) {
     const disabled =
       !motion.valid ||
       state.busyPlay.has(motion.id) ||
-      (state.playCooldownUntil.get(motion.id) || 0) > Date.now();
+      (state.playCooldownUntil.get(motion.id) || 0) > Date.now() ||
+      !robotControlsAvailable();
+    const playLabel =
+      state.stationMode === "real"
+        ? state.robotReachable === true
+          ? "Play on Robot"
+          : "Robot Offline"
+        : "Play in Sim";
     item.innerHTML = `
       <div class="motion-title">
         <strong>${motion.name}</strong>
@@ -142,7 +155,7 @@ function renderMotionList(container, source) {
       </div>
       <div class="motion-actions">
         <button class="${state.stationMode === "real" ? "danger" : "primary"}" ${disabled ? "disabled" : ""} data-motion-id="${motion.id}">
-          ${state.stationMode === "real" ? "Play on Robot" : "Play in Sim"}
+          ${playLabel}
         </button>
       </div>
     `;
@@ -192,6 +205,11 @@ function render() {
     : "Teleop Off";
   el.teleopToggleButton.setAttribute("aria-pressed", String(state.teleopActive));
   document.body.classList.toggle("teleop-active", state.teleopActive);
+  const controlsAvailable = robotControlsAvailable();
+  document.body.classList.toggle("robot-offline", state.stationMode === "real" && !controlsAvailable);
+  el.idleResetButton.disabled = !controlsAvailable;
+  el.motionRestartButton.disabled = !controlsAvailable;
+  el.teleopToggleButton.disabled = !controlsAvailable;
 }
 
 async function refresh({ quiet = false } = {}) {
@@ -207,10 +225,14 @@ async function refresh({ quiet = false } = {}) {
   if (health) {
     state.stationMode = health.station_mode || "unknown";
     state.robotInterface = health.robot_interface || "";
+    state.robotIp = health.robot_ip || "";
+    state.robotReachable = health.robot_reachable;
     el.healthText.textContent = `${health.service} · ${health.repo_root}`;
     el.stationMode.textContent =
       state.stationMode === "real"
-        ? `REAL ROBOT · ${state.robotInterface || "interface unknown"}`
+        ? `REAL ROBOT · ${state.robotInterface || "interface unknown"} · ${
+            state.robotReachable === true ? "online" : "offline"
+          }`
         : "SIMULATION";
     el.stationMode.className = state.stationMode === "real" ? "mode-real" : "mode-sim";
     document.body.classList.toggle("real-mode", state.stationMode === "real");
@@ -345,6 +367,10 @@ async function generateMotion(event) {
 
 async function playMotion(motionId) {
   if (state.busyPlay.has(motionId) || (state.playCooldownUntil.get(motionId) || 0) > Date.now()) return;
+  if (!robotControlsAvailable()) {
+    log(`Robot offline: cannot play on ${state.robotIp || state.robotInterface || "robot"}.`);
+    return;
+  }
 
   state.busyPlay.add(motionId);
   state.playCooldownUntil.set(motionId, Date.now() + 3000);
@@ -366,6 +392,10 @@ async function playMotion(motionId) {
 }
 
 async function sendReset(action, label) {
+  if (!robotControlsAvailable()) {
+    log(`Robot offline: cannot send ${label}.`);
+    return;
+  }
   const buttons = [el.emergencyStopButton, el.idleResetButton, el.motionRestartButton];
   buttons.forEach((button) => {
     button.disabled = true;
@@ -382,6 +412,7 @@ async function sendReset(action, label) {
     buttons.forEach((button) => {
       button.disabled = false;
     });
+    render();
   }
 }
 

@@ -13,6 +13,7 @@ import os
 import json
 import mimetypes
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -50,6 +51,7 @@ _CAMERA_VIEW_STORE: "CameraViewStore | None" = None
 _ZMQ_PUBLISHER: "StationZMQPublisher | None" = None
 _STATION_MODE = "sim"
 _ROBOT_INTERFACE = ""
+_ROBOT_IP = ""
 
 
 IDLE = 0
@@ -407,6 +409,22 @@ def _publisher_or_raise() -> StationZMQPublisher:
     return _ZMQ_PUBLISHER
 
 
+def _robot_reachable() -> bool | None:
+    if _STATION_MODE != "real":
+        return True
+    if not _ROBOT_IP:
+        return None
+    if shutil.which("ping") is None:
+        return None
+    proc = subprocess.run(
+        ["ping", "-c", "1", "-W", "1", _ROBOT_IP],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return proc.returncode == 0
+
+
 def _send_control_action(action: str) -> None:
     actions = {
         "emergency_stop": dict(start=False, stop=True, planner=True),
@@ -632,6 +650,8 @@ class SonicStationHandler(BaseHTTPRequestHandler):
                     "repo_root": str(REPO_ROOT),
                     "station_mode": _STATION_MODE,
                     "robot_interface": _ROBOT_INTERFACE,
+                    "robot_ip": _ROBOT_IP,
+                    "robot_reachable": _robot_reachable(),
                     "endpoints": [
                         "/health",
                         "/motions",
@@ -979,6 +999,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--station-mode", choices=("sim", "real"), default="sim")
     parser.add_argument("--robot-interface", default="")
+    parser.add_argument("--robot-ip", default="")
     parser.add_argument("--camera-disabled", action="store_true")
     parser.add_argument("--camera-host", default="localhost")
     parser.add_argument("--camera-port", type=int, default=5555)
@@ -989,10 +1010,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    global _CAMERA_STORE, _CAMERA_VIEW_STORE, _ZMQ_PUBLISHER, _STATION_MODE, _ROBOT_INTERFACE
+    global _CAMERA_STORE, _CAMERA_VIEW_STORE, _ZMQ_PUBLISHER, _STATION_MODE, _ROBOT_INTERFACE, _ROBOT_IP
     args = parse_args()
     _STATION_MODE = args.station_mode
     _ROBOT_INTERFACE = args.robot_interface
+    _ROBOT_IP = args.robot_ip
     _ZMQ_PUBLISHER = StationZMQPublisher(args.zmq_bind_host, args.zmq_port)
     if not args.camera_disabled:
         _CAMERA_STORE = CameraFrameStore(args.camera_host, args.camera_port)
@@ -1005,6 +1027,8 @@ def main() -> None:
     print(f"  motions: {url}/motions")
     print(f"  jobs:    {url}/jobs")
     print(f"  mode:    {args.station_mode}{(' on ' + args.robot_interface) if args.robot_interface else ''}")
+    if args.robot_ip:
+        print(f"  robot:   {args.robot_ip}")
     print(f"  command: tcp://{args.zmq_bind_host}:{args.zmq_port}")
     if args.camera_disabled:
         print("  camera:  disabled")
